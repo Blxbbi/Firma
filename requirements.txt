@@ -1,0 +1,19 @@
+# Firma Engine — runtime dependencies
+# Versions are the ones resolved in the active environment (2026-07-14).
+# Pinned to keep installs reproducible; relax with >= if you prefer float.
+
+sqlalchemy==2.0.51
+aiosqlite==0.22.1
+pydantic==2.12.5
+httpx==0.28.1
+openai==2.30.0
+numpy==2.5.0
+psutil==7.2.2
+aiofiles==25.1.0
+
+# PiMesh transport (engine/transport/pimessenger.py) — only needed when
+# FIRMA_TRANSPORT=pi-mesh. Not installed in base env; pin a recent release.
+nats>=2.7.0
+
+# Dev / tests — only 1 test file imports pytest; add if you run the suite.
+pytest>=8.0.0

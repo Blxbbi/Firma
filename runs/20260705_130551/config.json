@@ -1,0 +1,7 @@
+{
+  "project_prompt": "Erstelle eine moderne, hochprofessionelle Landingpage f\u00c3\u00bcr 'Firma', die deterministische AI-Execution-Engine. \nAnforderungen:\n1. Design: Modernes, industrielles Dark-Theme (Neon-Akzente, klare Typografie, responsive Layout).\n2. Inhalt: Erkl\u00c3\u00a4re die Kernprinzipien: 'Zentrale Wahrheit', 'Harte Governance' und 'Industrielle Skalierung'.\n3. Struktur: Die Seite muss zwingend aus drei Dateien bestehen: `index.html`, `style.css` und `script.js`.\n4. Interaktion: Ein einfacher, eleganter Effekt in `script.js` (z.B. Scroll-Animationen oder ein interaktives Element), um die Professionalit\u00c3\u00a4t zu unterstreichen.",
+  "verification_type": "structural_web",
+  "model": "meta/llama-3.1-70b-instruct",
+  "max_iterations": 5,
+  "concurrency": 1
+}

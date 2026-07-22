@@ -1,0 +1,46 @@
+{
+  "timestamp": "2026-07-01T15:58:46.354854+00:00",
+  "counters": {
+    "cas_attempts": 224,
+    "cas_success": 224
+  },
+  "histograms": {
+    "artifact_read_latency_ns": {
+      "count": 65,
+      "min": 6641900,
+      "max": 13398800,
+      "avg": 7339455.384615385
+    },
+    "sandbox_exec_latency_ns": {
+      "count": 65,
+      "min": 5486200,
+      "max": 13435100,
+      "avg": 11390215.384615384
+    },
+    "db_write_latency_ns": {
+      "count": 192,
+      "min": 19800,
+      "max": 5834300,
+      "avg": 2156650.5208333335
+    },
+    "db_select_latency_ns": {
+      "count": 64,
+      "min": 750500,
+      "max": 1117900,
+      "avg": 882889.0625
+    },
+    "transition_latency_ns": {
+      "count": 64,
+      "min": 9414300,
+      "max": 16605100,
+      "avg": 10567707.8125
+    },
+    "loop_lag_ns": {
+      "count": 2,
+      "min": 388500,
+      "max": 3250700,
+      "avg": 1819600.0
+    }
+  },
+  "stage": "baseline"
+}

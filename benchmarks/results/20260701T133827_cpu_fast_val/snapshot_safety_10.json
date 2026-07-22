@@ -1,0 +1,13 @@
+{
+  "timestamp": "2026-07-01T13:40:07.949062+00:00",
+  "counters": {},
+  "histograms": {
+    "loop_lag_ns": {
+      "count": 5,
+      "min": 21222300,
+      "max": 31518800,
+      "avg": 27036900.0
+    }
+  },
+  "stage": "safety_10"
+}

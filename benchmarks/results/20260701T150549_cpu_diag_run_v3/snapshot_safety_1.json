@@ -1,0 +1,18 @@
+{
+  "timestamp": "2026-07-01T15:06:11.153451+00:00",
+  "counters": {
+    "cas_attempts": 1323,
+    "cas_success": 10,
+    "artifact_bytes_written_total": 4096,
+    "cas_conflicts": 1313
+  },
+  "histograms": {
+    "loop_lag_ns": {
+      "count": 2,
+      "min": 317700,
+      "max": 3247300,
+      "avg": 1782500.0
+    }
+  },
+  "stage": "safety_1"
+}

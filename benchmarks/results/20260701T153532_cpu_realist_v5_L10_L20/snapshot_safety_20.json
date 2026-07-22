@@ -1,0 +1,53 @@
+{
+  "timestamp": "2026-07-01T15:37:59.481438+00:00",
+  "counters": {
+    "cas_attempts": 1559,
+    "cas_success": 1559,
+    "artifact_bytes_written_total": 792576
+  },
+  "histograms": {
+    "artifact_read_latency_ns": {
+      "count": 11,
+      "min": 5532600,
+      "max": 8017000,
+      "avg": 6039200.0
+    },
+    "sandbox_startup_latency_ns": {
+      "count": 12,
+      "min": 1971800,
+      "max": 12456300,
+      "avg": 3252991.6666666665
+    },
+    "sandbox_exec_latency_ns": {
+      "count": 11,
+      "min": 107109500,
+      "max": 120026800,
+      "avg": 111393081.81818181
+    },
+    "db_write_latency_ns": {
+      "count": 33,
+      "min": 20600,
+      "max": 4835700,
+      "avg": 2059481.8181818181
+    },
+    "db_select_latency_ns": {
+      "count": 11,
+      "min": 728600,
+      "max": 1115200,
+      "avg": 859700.0
+    },
+    "transition_latency_ns": {
+      "count": 11,
+      "min": 8974400,
+      "max": 11676600,
+      "avg": 10207454.545454545
+    },
+    "loop_lag_ns": {
+      "count": 1,
+      "min": 52654000,
+      "max": 52654000,
+      "avg": 52654000.0
+    }
+  },
+  "stage": "safety_20"
+}

@@ -1,0 +1,31 @@
+{
+  "timestamp": "2026-07-01T14:54:19.070506+00:00",
+  "counters": {},
+  "histograms": {
+    "artifact_read_latency_ns": {
+      "count": 2,
+      "min": 3494000,
+      "max": 3673600,
+      "avg": 3583800.0
+    },
+    "sandbox_startup_latency_ns": {
+      "count": 2,
+      "min": 2234200,
+      "max": 2275000,
+      "avg": 2254600.0
+    },
+    "sandbox_exec_latency_ns": {
+      "count": 2,
+      "min": 99521600,
+      "max": 104001500,
+      "avg": 101761550.0
+    },
+    "loop_lag_ns": {
+      "count": 1,
+      "min": 10750400,
+      "max": 10750400,
+      "avg": 10750400.0
+    }
+  },
+  "stage": "baseline"
+}

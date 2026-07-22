@@ -1,0 +1,13 @@
+{"timestamp": 1782919628.1210854, "cpu_percent": 23.1, "rss_mb": 64.2265625, "fds": 0, "ctx_switches": 1222}
+{"timestamp": 1782919629.129364, "cpu_percent": 25.8, "rss_mb": 67.9921875, "fds": 0, "ctx_switches": 2938}
+{"timestamp": 1782919630.151115, "cpu_percent": 30.7, "rss_mb": 68.77734375, "fds": 0, "ctx_switches": 4708}
+{"timestamp": 1782919631.1592882, "cpu_percent": 17.3, "rss_mb": 68.14453125, "fds": 0, "ctx_switches": 6471}
+{"timestamp": 1782919632.1674712, "cpu_percent": 16.1, "rss_mb": 69.9453125, "fds": 0, "ctx_switches": 8254}
+{"timestamp": 1782919633.1731946, "cpu_percent": 16.7, "rss_mb": 69.375, "fds": 0, "ctx_switches": 9756}
+{"timestamp": 1782919634.186499, "cpu_percent": 14.7, "rss_mb": 69.2421875, "fds": 0, "ctx_switches": 11538}
+{"timestamp": 1782919635.1926224, "cpu_percent": 16.4, "rss_mb": 70.83984375, "fds": 0, "ctx_switches": 13199}
+{"timestamp": 1782919636.2308264, "cpu_percent": 16.6, "rss_mb": 77.46484375, "fds": 0, "ctx_switches": 14706}
+{"timestamp": 1782919637.2439623, "cpu_percent": 17.1, "rss_mb": 78.77734375, "fds": 0, "ctx_switches": 16408}
+{"timestamp": 1782919638.2623093, "cpu_percent": 20.0, "rss_mb": 78.38671875, "fds": 0, "ctx_switches": 18095}
+{"timestamp": 1782919639.2764406, "cpu_percent": 17.1, "rss_mb": 77.83984375, "fds": 0, "ctx_switches": 19845}
+{"timestamp": 1782919640.2969828, "cpu_percent": 27.1, "rss_mb": 79.54296875, "fds": 0, "ctx_switches": 21574}

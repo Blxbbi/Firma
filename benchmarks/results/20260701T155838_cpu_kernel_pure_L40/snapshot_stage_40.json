@@ -1,0 +1,41 @@
+{
+  "timestamp": "2026-07-01T16:02:16.612000+00:00",
+  "counters": {
+    "cas_attempts": 2723,
+    "cas_success": 2723,
+    "artifact_bytes_written_total": 1311744
+  },
+  "histograms": {
+    "db_write_latency_ns": {
+      "count": 345,
+      "min": 20300,
+      "max": 4623300,
+      "avg": 1185891.0144927537
+    },
+    "db_select_latency_ns": {
+      "count": 260,
+      "min": 644200,
+      "max": 5976300,
+      "avg": 949085.3846153846
+    },
+    "transition_latency_ns": {
+      "count": 86,
+      "min": 16345800,
+      "max": 31847700,
+      "avg": 19405193.023255814
+    },
+    "loop_lag_ns": {
+      "count": 2,
+      "min": 5150400,
+      "max": 6328700,
+      "avg": 5739550.0
+    },
+    "artifact_write_latency_ns": {
+      "count": 87,
+      "min": 9957100,
+      "max": 19776800,
+      "avg": 11920360.91954023
+    }
+  },
+  "stage": "stage_40"
+}

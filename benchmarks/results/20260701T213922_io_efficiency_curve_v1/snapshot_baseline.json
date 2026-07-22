@@ -1,0 +1,13 @@
+{
+  "timestamp": "2026-07-01T21:43:18.204965+00:00",
+  "counters": {
+    "artifact_bytes_written_total": 7680000,
+    "cas_attempts": 32,
+    "cas_success": 30,
+    "cas_retry_depth": 3,
+    "cas_conflicts": 2,
+    "cas_successful_retries": 3
+  },
+  "histograms": {},
+  "stage": "baseline"
+}

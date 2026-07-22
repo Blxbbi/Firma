@@ -1,0 +1,60 @@
+{
+  "timestamp": "2026-07-01T15:06:18.358486+00:00",
+  "counters": {
+    "cas_attempts": 1522,
+    "cas_success": 49,
+    "artifact_bytes_written_total": 24576,
+    "cas_conflicts": 1473
+  },
+  "histograms": {
+    "artifact_read_latency_ns": {
+      "count": 19,
+      "min": 2858900,
+      "max": 5342200,
+      "avg": 3840278.947368421
+    },
+    "sandbox_startup_latency_ns": {
+      "count": 19,
+      "min": 2171300,
+      "max": 15096600,
+      "avg": 4095184.210526316
+    },
+    "sandbox_exec_latency_ns": {
+      "count": 18,
+      "min": 121523900,
+      "max": 147565200,
+      "avg": 130180094.44444445
+    },
+    "db_write_latency_ns": {
+      "count": 125,
+      "min": 20800,
+      "max": 8914500,
+      "avg": 1730815.2
+    },
+    "db_select_latency_ns": {
+      "count": 70,
+      "min": 662100,
+      "max": 1418000,
+      "avg": 976725.7142857143
+    },
+    "transition_latency_ns": {
+      "count": 36,
+      "min": 9640900,
+      "max": 27774200,
+      "avg": 16325372.222222222
+    },
+    "artifact_write_latency_ns": {
+      "count": 17,
+      "min": 11279700,
+      "max": 17558300,
+      "avg": 13362705.88235294
+    },
+    "loop_lag_ns": {
+      "count": 4,
+      "min": 206200,
+      "max": 43146500,
+      "avg": 24150175.0
+    }
+  },
+  "stage": "stage_10"
+}

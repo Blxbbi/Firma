@@ -1,0 +1,42 @@
+# DB files (also at repo root)
+data/db/*
+*.db
+*.db-shm
+*.db-wal
+
+# Logs (also at repo root)
+archive/logs/*
+*.log
+
+# Runtime / debug output
+run_*_forensics.log
+run_*_test.log
+run_*_debug.log
+
+# Artifacts
+data/artifacts/*
+archive/artifacts/*
+
+# Temp & Cache
+archive/temp/*
+__pycache__/
+*.pyc
+
+# Crew / runtime state
+.crew/
+.pi/
+pimesh/
+
+# Project runtime / generated
+workspace/
+data/
+archive/deliverables/
+archive/runs/
+deliverables/
+
+# Windows / editor junk
+nul
+*.backup
+.Trash-*
+
+# Base sessions live under data/, but we keep the committed baseline folder structure via .gitkeep instead of the actual JSONL files

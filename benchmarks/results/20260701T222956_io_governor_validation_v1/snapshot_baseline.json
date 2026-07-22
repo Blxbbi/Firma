@@ -1,0 +1,62 @@
+{
+  "timestamp": "2026-07-01T22:30:10.308960+00:00",
+  "counters": {
+    "artifact_bytes_written_total": 7680000,
+    "cas_attempts": 52,
+    "cas_success": 30,
+    "cas_successful_retries": 15,
+    "cas_conflicts": 22,
+    "cas_retry_depth": 9
+  },
+  "histograms": {
+    "loop_lag_ns": {
+      "count": 4,
+      "min": 511700,
+      "max": 34070500,
+      "avg": 13390525.0
+    },
+    "db_write_latency_ns": {
+      "count": 13,
+      "min": 20300,
+      "max": 6614900,
+      "avg": 2020661.5384615385
+    },
+    "db_select_latency_ns": {
+      "count": 13,
+      "min": 807800,
+      "max": 1434000,
+      "avg": 999123.0769230769
+    },
+    "artifact_write_latency_ns": {
+      "count": 1,
+      "min": 92766300,
+      "max": 92766300,
+      "avg": 92766300.0
+    },
+    "transition_latency_ns": {
+      "count": 3,
+      "min": 10453300,
+      "max": 180872800,
+      "avg": 67565633.33333333
+    },
+    "artifact_read_latency_ns": {
+      "count": 2,
+      "min": 5291100,
+      "max": 6191900,
+      "avg": 5741500.0
+    },
+    "sandbox_startup_latency_ns": {
+      "count": 2,
+      "min": 2233000,
+      "max": 2320100,
+      "avg": 2276550.0
+    },
+    "sandbox_exec_latency_ns": {
+      "count": 2,
+      "min": 107807100,
+      "max": 108679500,
+      "avg": 108243300.0
+    }
+  },
+  "stage": "baseline"
+}
