@@ -187,6 +187,32 @@ class RunArchiver:
 
         return by_task
 
+    def _collect_turn_usage_by_task(self, run_id: str) -> Dict[str, Dict[str, Any]]:
+        """Parse worker.log files and aggregate turn/tool metrics by task_id.
+
+        Centralized parsing via ``engine.services.worker_log_parser.parse_worker_log``.
+        Returns: {task_id: {turn_count, tool_calls, token_usage, warnings}, ...}
+        """
+        from engine.services.worker_log_parser import parse_worker_log
+
+        by_task: Dict[str, Dict[str, Any]] = {}
+        base = Path(BASE_DIR)
+
+        for role, crew_rel in PIMESH_CREWS.items():
+            crew_dir = base / crew_rel / ".pi" / "work" / run_id
+            if not crew_dir.is_dir():
+                continue
+            for task_dir in sorted(crew_dir.iterdir()):
+                if not task_dir.is_dir():
+                    continue
+                task_id = task_dir.name
+                log_path = task_dir / "worker.log"
+                if not log_path.is_file():
+                    continue
+                metrics = parse_worker_log(log_path)
+                by_task[task_id] = metrics.to_dict()
+        return by_task
+
     def _build_config_snapshot(self, config: Dict[str, Any]) -> Dict[str, Any]:
         snap: Dict[str, Any] = {}
         if config:
@@ -253,6 +279,7 @@ class RunArchiver:
 
         # Phase 7 (Idee A): collect tool usage from worker.log files for audit
         tool_usage_by_task = self._collect_tool_usage_by_task(run_id)
+        turn_usage_by_task = self._collect_turn_usage_by_task(run_id)
 
         manifest = {
             "run_id": run_id,
@@ -263,6 +290,7 @@ class RunArchiver:
             "task_summary": task_summary,
             "artifact_refs": artifact_refs,
             "tool_usage_by_task": tool_usage_by_task,
+            "turn_usage_by_task": turn_usage_by_task,
             "logs_path": str(run_dir / "run.log"),
             "db_snapshot_path": str(run_dir / "db_snapshot.json"),
             "config_snapshot": config_snapshot,

@@ -134,6 +134,7 @@ class RunAuditor:
         repro_env = self._repro_env(manifest)
         tool_usage = self._tool_usage_section(manifest, tasks)
         policy_checks = self._tool_policy_checks(manifest, tasks)
+        turn_usage = self._turn_usage_section(manifest, tasks)
 
         # run-level failure reason (governance/guard messages live here)
         run_failure = (
@@ -156,10 +157,11 @@ class RunAuditor:
             "repro_env": repro_env,
             "tool_usage": tool_usage,
             "tool_policy_checks": policy_checks,
+            "turn_usage": turn_usage,
             "sections_present": [
                 "overview", "task_table", "scope_summary", "research",
                 "failures", "artifacts", "repro_env",
-                "tool_usage", "tool_policy_checks",
+                "tool_usage", "tool_policy_checks", "turn_usage",
             ],
             "warnings": warnings,
         }
@@ -200,6 +202,27 @@ class RunAuditor:
             }
             checks.append(check)
         return checks
+
+    def _turn_usage_section(self, manifest, tasks) -> Dict[str, Any]:
+        turn_by_task = manifest.get("turn_usage_by_task") or {}
+        by_role: Dict[str, Dict[str, Any]] = {}
+        for t in tasks:
+            task_turn = turn_by_task.get(t.id, {})
+            role = t.assigned_role or "UNKNOWN"
+            role_agg = by_role.setdefault(role, {
+                "tasks": 0,
+                "turns": 0,
+                "tool_calls": 0,
+                "warnings": [],
+            })
+            role_agg["tasks"] += 1
+            role_agg["turns"] += task_turn.get("turn_count", 0) or 0
+            role_agg["tool_calls"] += sum(task_turn.get("tool_calls", {}).values())
+            role_agg["warnings"].extend(task_turn.get("warnings") or [])
+        return {
+            "by_task": turn_by_task,
+            "by_role": by_role,
+        }
 
     def _scope_summary(self, manifest, run_dir) -> List[Dict[str, Any]]:
         out: List[Dict[str, Any]] = []
@@ -424,6 +447,23 @@ class RunAuditor:
         else:
             L.append("- no policy checks (no tool usage data available)")
         L.append("")
+
+        L.append("## 10. Turn Usage by Role")
+        turn = r.get("turn_usage", {})
+        turn_by_role = turn.get("by_role", {})
+        if turn_by_role:
+            for role, agg in turn_by_role.items():
+                L.append(f"### {role}")
+                L.append(f"- tasks: {agg.get('tasks', 0)}")
+                L.append(f"- turns: {agg.get('turns', 0)}")
+                L.append(f"- tool_calls: {agg.get('tool_calls', 0)}")
+                warns = agg.get("warnings") or []
+                for w in warns:
+                    L.append(f"- warning: {w}")
+                L.append("")
+        else:
+            L.append("- no turn usage data (worker logs not available)")
+            L.append("")
 
         if r.get("warnings"):
             L.append("## Warnings (non-fatal)")
