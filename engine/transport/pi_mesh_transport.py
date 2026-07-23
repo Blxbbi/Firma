@@ -128,7 +128,7 @@ class PiMeshTransport(WorkerTransport):
     def _worker_response_filename(self, task_id: str) -> str:
         return f"worker_response.{task_id}{WORKER_RESPONSE_SUFFIX}"
 
-    def _build_spec_markdown(self, payload: Dict[str, Any], review_artifacts: Optional[Dict[str, str]] = None) -> str:
+    def _build_spec_markdown(self, payload: Dict[str, Any], crew_cwd: str, review_artifacts: Optional[Dict[str, str]] = None) -> str:
         """Die Spec, die der Crew-Worker als Task-Beschreibung liest.
 
         Enthaelt das vollstaendige Firma TASK_ASSIGNMENT (run_id, task_id,
@@ -156,6 +156,21 @@ class PiMeshTransport(WorkerTransport):
         if expected and isinstance(expected[0], dict) and expected[0].get("path"):
             example_path = expected[0]["path"]
 
+        # PLANNER: research brief injizieren, falls vorhanden
+        research_brief = None
+        if role == "PLANNER":
+            try:
+                brief_path = os.path.join(crew_cwd, ".pi", "messenger", "crew", "research", "brief.md")
+                if os.path.isfile(brief_path):
+                    with open(brief_path, "r", encoding="utf-8") as f:
+                        research_brief = f.read()
+            except Exception as exc:
+                logger.warning(
+                    "[PiMeshTransport] Failed to load research brief for PLANNER %s: %s",
+                    task_id,
+                    exc,
+                )
+
         parts: list = []
         parts.append(f"# Firma Task {task_id}  (Role: {role})\n\n")
         parts.append(
@@ -171,6 +186,18 @@ class PiMeshTransport(WorkerTransport):
                 "## Deine Aufgabe (AUTHORITATIVE)\n"
                 "Du erstellst EINEN Plan (`plan_draft`). Schreibe KEINEN Code.\n\n"
             )
+            if research_brief:
+                parts.append("## Research Brief (CONTEXT)\n")
+                parts.append(
+                    "Der folgende Brief wurde VOR dir von einem RESEARCHER erstellt. "
+                    "Nutze ihn als Grundlage fuer deine Planung:\n\n"
+                )
+                parts.append(f"```markdown\n{research_brief}\n```\n\n")
+            else:
+                parts.append("## Research Brief (CONTEXT)\n")
+                parts.append(
+                    "Kein Research Brief vorhanden. Plane auf Basis des User Goals und der Akzeptanzkriterien.\n\n"
+                )
         elif role == "REVIEWER":
             parts.append("## Your Task (AUTHORITATIVE)\n")
             parts.append(
@@ -398,7 +425,7 @@ class PiMeshTransport(WorkerTransport):
         )
         self._atomic_write(
             os.path.join(tasks_dir, f"{task_id}.md"),
-            self._build_spec_markdown(payload, review_artifacts),
+            self._build_spec_markdown(payload, crew_cwd, review_artifacts),
         )
         logger.info(f"[PiMeshTransport] Dispatched {role} task {task_id} -> {tasks_dir}")
 
