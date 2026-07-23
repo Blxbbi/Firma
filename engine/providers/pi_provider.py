@@ -59,6 +59,21 @@ class PiProvider:
         self.extension_dir = extension_dir or self._find_extension()
 
     @staticmethod
+    def tools_for_role(role: str, mode: Optional[str] = None) -> str:
+        """Return the default toolset for a given role/mode.
+
+        - REVIEWER/PLANNER/RESEARCHER: read/write only (no bash/edit).
+        - CODER from-scratch: read/write/edit (bash off).
+        - CODER ingest/edit: read/write/edit (bash off).
+        """
+        role = (role or "").upper()
+        if role in {"REVIEWER", "PLANNER", "RESEARCHER"}:
+            return "read,write"
+        if role == "CODER":
+            return "read,write,edit"
+        return "read,write,edit,bash"
+
+    @staticmethod
     def _find_extension() -> Optional[str]:
         base = os.path.expanduser("~/.pi/agent/npm/node_modules/pi-messenger")
         if os.path.isdir(base):
@@ -134,24 +149,18 @@ class PiProvider:
         session_id: Optional[str] = None,
         session_dir: Optional[str] = None,
         correction_note: Optional[str] = None,
+        tools: Optional[str] = None,
     ):
-        """Spawned einen Pi-Worker fuer ein konkretes Assignment (fire-and-forget).
-
-        In ingest mode (FIRMA_PROJECT_DIR set), the existing project tree is staged
-        into a task-specific workdir inside the crew cwd so the CODER can read
-        existing files and perform surgical edits instead of full rewrites.
-        """
         prov = None
         mdl = model
         if model and "/" in model:
             prov, mdl = model.split("/", 1)
 
-        # F4: stage the existing project into the crew workdir for CODER/RESEARCHER in ingest mode.
-        # This is read-only for the worker (the source of truth for drift remains the
-        # kernel-side workspace tree, measured by the scope verifier).
-        project_workdir = self._stage_ingest_project_if_needed(role, run_id, task_id, crew_cwd)
+        effective_tools = tools if tools is not None else PiProvider.tools_for_role(role)
+        provider = PiProvider(provider=prov, model=mdl, tools=effective_tools, extension_dir=self.extension_dir)
+        project_workdir = provider._stage_ingest_project_if_needed(role, run_id, task_id, crew_cwd)
 
-        prompt = self.build_assignment_prompt(task_id, correction_note=correction_note)
+        prompt = provider.build_assignment_prompt(task_id, correction_note=correction_note)
         if project_workdir:
             if role == "CODER":
                 prompt = (
@@ -204,7 +213,7 @@ class PiProvider:
         )
         # Per-task log to avoid collision across concurrent spawns.
         log_path = os.path.join(crew_cwd, ".pi", "work", run_id, task_id, "worker.log")
-        return self.spawn_worker(
+        return provider.spawn_worker(
             crew_cwd, short_prompt, model=mdl, provider=prov, session_id=session_id, session_dir=session_dir, log_path=log_path
         )
 

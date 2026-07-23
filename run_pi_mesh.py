@@ -200,28 +200,46 @@ class PiMeshReceiverLoop:
             logger.warning(f"[Receiver] Cannot parse plan side-file {side}: {e}")
 
     def _response_artifacts_pending(self, crew_cwd, wp) -> bool:
-        """True wenn ein CREATE/UPDATE-Artefakt noch nicht auf Disk liegt.
+        """True wenn ein CREATE/UPDATE-Artefakt noch nicht auf persistente Disk liegt.
+
+        Reihenfolge:
+        1. `data/artifacts/<run_id>/<task_id>/` (ARTIFACT_DIR, Artefakt-Store)
+        2. Worker-Dir (Fallback für CODER-Inline, bevor der Store gefüllt ist)
 
         Das Modell schreibt die worker_response-Datei oft mehrfach um (je nach Datei,
-        die es gerade erzeugt hat). Solange ein referenziertes Artefakt fehlt, wird der
-        Scan deferiert, um Race-Conditions + falsche Artifact-Contract-Violations zu meiden.
+        die es gerade erzeugt hat). Solange kein referenziertes Artefakt auf persistente
+        Disk geschrieben wurde, wird der Scan deferiert, um Race-Conditions + falsche
+        Artifact-Contract-Violations zu meiden.
         """
         if not isinstance(wp, dict):
             return False
         arts = wp.get("artifacts") or []
         worker_dir = self._worker_dir(crew_cwd)
+        run_id = wp.get("run_id")
+        task_id = wp.get("task_id")
         for art in arts:
             if not isinstance(art, dict):
                 continue
-            if art.get("action") in ("CREATE", "UPDATE"):
-                p = self._safe_path(worker_dir, art.get("path", ""))
-                if p is None:
-                    # Unsicherer Pfad (absolute/'..') -> vom _inline_content als
-                    # Security-Boundary behandelt, NICHT deferen (sonst Endlosschleife).
-                    continue
-                if not os.path.isfile(p):
-                    return True
+            if art.get("action") not in ("CREATE", "UPDATE"):
+                continue
+            p = art.get("path", "")
+            if not p:
+                continue
+            # 1. Artefakt-Store (ARTIFACT_DIR/<run_id>/<task_id>/<path>)
+            store_path = None
+            if run_id and task_id:
+                candidate = os.path.join(ARTIFACT_DIR, run_id, task_id, p)
+                if os.path.isfile(candidate):
+                    continue  # vorhanden -> nicht pending
+            # 2. Worker-Dir (Fallback)
+            safe = self._safe_path(worker_dir, p)
+            if safe is None:
+                # Unsicherer Pfad -> vom _inline_content behandelt, nicht defer-en.
+                continue
+            if not os.path.isfile(safe):
+                return True
         return False
+
 
     def _schema_fail(self, raw: Dict[str, Any], error: str) -> Dict[str, Any]:
         """Kanonischer Struktur-Bruch -> SUBMISSION_INVALID_SCHEMA (kein Repair)."""
@@ -655,6 +673,7 @@ def make_pimesh_messenger_callback(transport, provider, crew_cwds, project_root,
                 session_id=session_id,
                 session_dir=session_dir,
                 correction_note=correction_note,
+                tools=PiProvider.tools_for_role(role),
             )
             logger.info(
                 '[pimesh] spawned %s worker for %s (model=%s, session_mode=%s, session_id=%s) '
@@ -862,7 +881,16 @@ async def main_logic():
 
     db_path = DB_DIR / "snake_pimesh.db"
     if db_path.exists():
-        os.remove(db_path)
+        import time
+        for attempt in range(5):
+            try:
+                os.remove(db_path)
+                break
+            except PermissionError:
+                if attempt < 4:
+                    time.sleep(0.5)
+                else:
+                    raise
     db_manager = DatabaseManager(f"sqlite+aiosqlite:///{db_path}")
     async with db_manager.engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -1038,29 +1066,41 @@ def _web_verifier():
 
 def _snake_config() -> Dict[str, Any]:
     return {
-        "project_name": "Retro Snake Game (PiMesh)",
-        "plan_name": "Classic Snake Implementation",
+        "project_name": "Firma Project Website (PiMesh)",
+        "plan_name": "Professional Firma Website",
         "prompt": (
-            "You are an expert web developer. Create a fully functional, retro-style Snake game as a web app.\n\n"
-            "CRITICAL DELIVERY REQUIREMENTS:\n"
-            "1. You MUST produce exactly these three files:\n"
-            "   - index.html (The main page containing the game canvas)\n"
-            "   - style.css (Retro arcade aesthetics: dark background, neon colors, pixel font)\n"
-            "   - game.js (Complete game logic: movement, food growth, collision detection, scoring)\n"
-            "2. No Python files. No requirements.txt. No explanations. No markdown text outside the JSON.\n"
-            "3. The game must be immediately playable in a browser.\n"
-            "4. Use HTML5 Canvas for the game board.\n"
-            "5. Implement classic snake mechanics: arrow keys for movement, eating food to grow, game over on wall/self collision.\n\n"
+            "Erstelle eine professionelle, moderne Website für das Open-Source-Projekt \"Firma\".\n\n"
+            "Firma ist ein deterministisches Multi-Agenten-Execution-Framework für Softwareprojekte. "
+            "Es orchestriert autonome KI-Worker (Researcher, Planner, Coder, Reviewer) über ein strukturiertes Task-System "
+            "mit strengen Zustandsmaschinen, zustandslosen Workern, Artefakt-Pipelines und reproduzierbaren Runs.\n\n"
+            "Die Website soll den Eindruck eines durchdachten, technisch anspruchsvollen Open-Source-Projekts vermitteln, "
+            "nicht den einer Hobby-Bastelbude. Sie soll schick, vertrauenswürdig und informativ sein und einen klaren roten Faden haben.\n\n"
+            "Bitte liefere eine vollständige, produktionsreife Website mit mindestens folgenden Inhalten:\n"
+            "- Hero-Bereich mit klarer Projektpositionierung\n"
+            "- Architektur/Workflow-Uebersicht (Researcher, Planner, Coder, Reviewer, Guardian, Orchestrator)\n"
+            "- Features/Staerken (Determinismus, Reproduzierbarkeit, Read-only-Worker, Artefakt-Tracking, Auditing)\n"
+            "- Einsatzzweck/Nutzen\n"
+            "- Projektstatus/Reife (Meilensteine, lauffaehige Pipeline)\n"
+            "- Installations-/Startabschnitt\n"
+            "- Vertrauenselemente (Governance, nachvollziehbare Runs)\n\n"
+            "Gestalterisch soll die Seite professionell und modern wirken: klare visuelle Hierarchie, gute Typografie, "
+            "ruhige Tiefe, kein ueberladener Slider-Kram. Sie soll auf Mobilgeraeten und Desktop gleichermassen funktionieren.\n\n"
+            "Technische Rahmenbedingungen:\n"
+            "- Plain HTML/CSS/JS, keine Build-Tools, keine externen Frameworks\n"
+            "- Es muessen genau diese Dateien entstehen: index.html, style.css, app.js\n"
+            "- Die Seite muss durch Oeffnen von index.html im Browser funktionsfaehig bleiben\n"
+            "- Barrierefreiheit und Ladezeit beachten\n\n"
             "Return ONLY the JSON object."
         ),
-        "expected_artifacts": ["index.html", "style.css", "game.js"],
+        "expected_artifacts": ["index.html", "style.css", "app.js"],
         "acceptance_criteria": [
             "EXISTS:index.html",
             "EXISTS:style.css",
-            "EXISTS:game.js",
-            "CONTAINS:index.html:<canvas",
-            "CONTAINS:game.js:requestAnimationFrame",
-            "CONTAINS:game.js:addEventListener('keydown'",
+            "EXISTS:app.js",
+            "CONTAINS:index.html:Firma",
+            "CONTAINS:index.html:Architektur",
+            "CONTAINS:style.css:root",
+            "CONTAINS:app.js:addEventListener",
         ],
         "verification_type": "structural_web",
     }
