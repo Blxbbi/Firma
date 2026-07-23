@@ -200,40 +200,24 @@ Die Worker sind **keine denkenden Agenten, sondern gebundene Werkzeuge** des Ker
 **Bewertung:**
 - ✅ Plan-Struktur ist klar
 - ✅ SpecGate prüft Pläne vor Annahme (Duplikate, Zyklen, ungültige Rollen)
+- ✅ **Research-Brief wird automatisch injiziert, falls vorhanden** (seit 2026-07-23)
 - ❌ Keine Plan-Qualitäts-Validierung im Runtime (Task-Größe, Testbarkeit)
-- ❌ **Planner hat keinen Zugriff auf Research-Brief des Researchers — plant blind** → siehe [§3.5.1](#351-planner--research-brief)
 - ❌ Task-Größen-Limit im SpecGate fehlt
 
 ##### 3.5.1 Planner + Research-Brief
 
-**Das Problem:**
+**Status: ✅ Gelöst (2026-07-23)**
 
-Der Planner erhält aktuell **nur den ursprünglichen Request/Goal**. Wenn ein `RESEARCHER` vorher Recherche betreibt (z. B. Projektstruktur analysieren, existierende Dateien scannen, Abhängigkeiten finden), werden diese Ergebnisse **nicht an den Planner weitergegeben**.
+**Das Problem (war):**
 
-**Konsequenz:**
-- Der Planner erstellt Tasks „blind“
-- Er weiß nicht, welche Dateien bereits existieren
-- Er plant keine sequentiellen Abhängigkeiten auf Basis echter Projektstruktur
-- Tasks werden redundant oder überschneiden sich
+Der Planner erhielt ursprünglich **nur den ursprünglichen Request/Goal**. Wenn ein `RESEARCHER` vorher Recherche betrieb (z. B. Projektstruktur analysieren, existierende Dateien scannen, Abhängigkeiten finden), wurden diese Ergebnisse **nicht an den Planner weitergegeben**.
 
-**Beispiel:**
-```
-User-Request: "Bau mir ein Snake-Spiel"
+**Umsetzung:**
 
-1. RESEARCHER scannt Projekt → findet keine Game-Logik
-                         → schreibt research/brief.md mit korrekten Pfaden
+`engine/transport/pi_mesh_transport.py` injiziert den Research-Brief automatisch in den Planner-Prompt, falls die Datei `.pi/messenger/crew/research/brief.md` im Crew-cwd existiert. Wenn kein Brief vorhanden ist, erhält der Planner einen klaren Hinweis und plant auf Basis des User Goals.
 
-2. PLANNER bekommt NUR "Bau mir ein Snake-Spiel"
-                         → weiß nichts vom Research-Brief
-                         → plant Tasks möglicherweise mit falschen Annahmen
-```
-
-**Lösung:**
-- Research-Brief als Teil des Planner-Prompts injizieren
-- Oder: Planner erhält `research/brief.md` als Input-Context
-- Task-Größen-Limit im SpecGate erzwingen
-
-**Priorität:** HOCH — schlechte Pläne führen zu schlechten Runs.
+**Datei:**
+- `engine/transport/pi_mesh_transport.py::_build_spec_markdown()` — Research-Brief-Loading für PLANNER-Rolle
 
 ---
 
@@ -341,7 +325,7 @@ Die Prompts werden **dynamisch in `_build_spec_markdown()`** generiert (`engine/
 
 #### PLANNER
 - ✅ Hartes JSON-Schema, kein Code-Schreiben erlaubt
-- ❌ Kein Zugriff auf Research-Brief — plant blind → siehe [§3.5.1](#351-planner--research-brief)
+- ✅ Research-Brief wird automatisch injiziert, falls vorhanden (seit 2026-07-23)
 
 #### CODER
 - ✅ Klare Scope-Begrenzung ("ausschließlich diese Task")
@@ -368,10 +352,10 @@ Die Prompts werden **dynamisch in `_build_spec_markdown()`** generiert (`engine/
 |---|---|---|---|
 | CODER | ⭐⭐⭐⭐☆ | ⭐⭐⭐☆☆ | Stabil |
 | RESEARCHER | ⭐⭐⭐⭐⭐ | ⭐⭐⭐☆☆ | Gut, Citations unverifiziert |
-| PLANNER | ⭐⭐⭐☆☆ | ⭐⭐⭐⭐☆ | Kritisch: Research-Brief fehlt |
+| PLANNER | ⭐⭐⭐⭐☆ | ⭐⭐⭐⭐☆ | Stabil: Research-Brief injiziert |
 | REVIEWER | ⭐⭐⭐⭐☆ | ⭐⭐⭐⭐☆ | Stabil, optimiert |
 
-**Priorität:** **Planner** Research-Brief injizieren. Dann **CitationVerifier** für Researcher bauen.
+**Priorität:** **CitationVerifier** für Researcher bauen.
 
 ---
 
@@ -444,6 +428,7 @@ Das System ist aktuell ein **MVP/Prototyp auf sehr hohem Niveau** — keine fert
 ### Was neu hinzugekommen ist (seit 2026-07-19)
 
 - ✅ **Reviewer-Optimierung abgeschlossen:** 4 Turns, 152k Tokens, Tool-Policies, ONE-PASS-Vertrag
+- ✅ **Planner + Research-Brief verknüpft:** Research-Brief wird automatisch in Planner-Prompt injiziert
 - ✅ **GitHub-Backup:** Sauberer Branch `clean-backup-2` ohne historische Secrets
 - ✅ **Meilenstein dokumentiert:** `milestones/reviewer_optimization_and_backup_2026-07-23`
 - ✅ **Docs-Struktur:** Neu geordnet in `decisions/`, `guides/`, `plans/`, `vision/`, `meta/`, `briefings/`
@@ -454,7 +439,6 @@ Das System ist aktuell ein **MVP/Prototyp auf sehr hohem Niveau** — keine fert
 | Priorität | Thema | Maßnahme | Aufwand |
 |---|---|---|---|
 | 🔴 **HOCH** | Sandbox-Sicherheit | Docker-Sandbox als zweite `SandboxExecutor`-Implementierung (`--network none`, read-only Mounts) | Mittel |
-| 🔴 **HOCH** | Planner + Research | Planner bekommt Research-Brief; Task-Größen-Limit im SpecGate | Mittel |
 | 🟡 **MITTEL** | Resume/Rollback | Save-State + `firma resume <run_id>` | Hoch |
 | 🟡 **MITTEL** | Start/UX | Einziger Entry-Point + CLI (`firma run/status/stop/logs`) | Hoch |
 | 🟡 **MITTEL** | Performance-Tests | Automatisierte Latenz-Regressionstests für Tick-Loop | Mittel |
@@ -477,9 +461,9 @@ Das System ist aktuell ein **MVP/Prototyp auf sehr hohem Niveau** — keine fert
 ### Was am dringendsten repariert werden muss
 
 1. **Sandbox ist kein Gefängnis** — Worker-Code läuft mit deinen Rechten. Docker/VM-Isolation ist Pflicht, sobald du mit echten LLMs arbeitest.
-2. **Planner plant blind** — ohne Research-Brief fehlt ihm Kontext, was zu schlechten Plänen führt.
-3. **Kein Resume** — wenn ein Run abbricht, ist er weg. Kein Save-State, kein Continue.
-4. **Kein kanonischer Entry-Point** — Nutzer müssen wissen, welche Datei sie starten müssen.
+2. **Kein Resume** — wenn ein Run abbricht, ist er weg. Kein Save-State, kein Continue.
+3. **Kein kanonischer Entry-Point** — Nutzer müssen wissen, welche Datei sie starten müssen.
+4. **Task-Größen-Limit im SpecGate** — zu große Tasks führen zu unbrauchbaren Plänen.
 
 ### Was die Firma richtig gemacht hat
 
