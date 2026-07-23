@@ -4,7 +4,7 @@ import json
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List, Dict, Any
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update as sql_update
@@ -34,6 +34,37 @@ class GuardianPipeline:
 
     def __init__(self, artifact_store: ArtifactStore):
         self.artifact_store = artifact_store
+
+    @staticmethod
+    def validate_plan_draft(plan_data: Dict[str, Any]) -> Tuple[bool, List[str]]:
+        """Validate a plan_draft for structural sanity.
+
+        Rules (v1):
+        - max 5 tasks total
+        - CODER tasks must have at least 1 expected_artifacts
+        - max 3 expected_artifacts per task
+        """
+        issues: List[str] = []
+        tasks = plan_data.get("tasks") or []
+        if len(tasks) == 0:
+            issues.append("Plan has no tasks")
+        if len(tasks) > 5:
+            issues.append(f"Plan has {len(tasks)} tasks (max 5)")
+
+        for t in tasks:
+            role = (t.get("role") or "CODER").upper()
+            arts = t.get("expected_artifacts") or []
+            if role == "CODER" and len(arts) == 0:
+                issues.append(
+                    f"Task '{t.get('id')}' is a CODER task but has no expected_artifacts; "
+                    "CODER tasks must produce files."
+                )
+            if len(arts) > 3:
+                issues.append(
+                    f"Task '{t.get('id')}' has {len(arts)} expected_artifacts (max 3); "
+                    "split into smaller tasks."
+                )
+        return len(issues) == 0, issues
 
     def _normalize_utc(self, dt):
         """Ensures a datetime object is timezone-aware UTC."""
@@ -480,20 +511,28 @@ class GuardianPipeline:
             await self._log_attempt(session, response, task, outcome, error_code=error_code, duration_ms=duration_ms, run_id=run_id)
             
             if response.artifacts:
-                project_id = task.plan.project_id
-                version = task.plan.version
-                
-                success = await self.artifact_store.persist_artifacts(
-                    session,
-                    project_id,
-                    version,
-                    task.id,
-                    response.artifacts,
-                    run_id=run_id
-                )
-                if not success:
-                    telemetry.observe("transition_latency_ns", time.perf_counter_ns() - t0)
-                    return False, "Artifact persistence failed"
+                # REVIEWER validiert nur, es schreibt keine neuen Dateiinhalte.
+                # -> Nur Existenz/Metadata-Check, kein persist_artifacts mit content-None.
+                if response.event in (TaskEvent.REVIEW_APPROVED.value, TaskEvent.REVIEW_FAILURE.value):
+                    logger.info(
+                        "[Guardian] Skip artifact persist for %s review (event=%s); artifacts already persisted by CODER",
+                        task.id, response.event,
+                    )
+                else:
+                    project_id = task.plan.project_id
+                    version = task.plan.version
+                    
+                    success = await self.artifact_store.persist_artifacts(
+                        session,
+                        project_id,
+                        version,
+                        task.id,
+                        response.artifacts,
+                        run_id=run_id
+                    )
+                    if not success:
+                        telemetry.observe("transition_latency_ns", time.perf_counter_ns() - t0)
+                        return False, "Artifact persistence failed"
 
             # Determine the next state
             # Planner-Finalisierung gehoert zum ALTEN Plan (der Plan wurde soeben
@@ -507,84 +546,99 @@ class GuardianPipeline:
                 # and we must instantiate the tasks defined in the plan.
                 plan_data = response.plan_draft.model_dump() if response.plan_draft else {}
                 
-                # 1. Create the Plan object in DB
-                new_plan = Plan(
-                    id=str(uuid.uuid4()),
-                    run_id=run_id,
-                    project_id=task.plan.project_id,
-                    version=task.plan.version + 1,
-                    name=plan_data.get("plan_name", "Unnamed Plan"),
-                    status="IN_PROGRESS"
-                )
-                session.add(new_plan)
-                await session.flush()
-
-                # 2. Create the Tasks defined in the plan
-                def _wire_ingest_scope(task_id, t_def):
-                    # Phase 2 (Idee A) Step3.3: in ingest mode, derive scope from the
-                    # task's expected_artifacts and fill protected_files deterministically
-                    # (kernel-side policy, NOT the LLM).
-                    try:
-                        from engine.services.ingest_context import get_ingest, set_task_scope
-                        from engine.services.baseline_manifest import load_manifest
-                        from engine.models import TaskDefinition
-                        from engine.services.scope_policy import apply_ingest_scope
-                        ing = get_ingest(run_id)
-                        if not ing:
-                            return
-                        baseline = load_manifest(ing["baseline_path"])
-                        project_files = list(baseline.get("files", {}).keys())
-                        arts = t_def.get("expected_artifacts", []) or []
-                        scope_files = []
-                        for a in arts:
-                            if isinstance(a, dict) and a.get("path"):
-                                p = a["path"].replace("\\", "/")
-                                if p not in scope_files:
-                                    scope_files.append(p)
-                        td = TaskDefinition(
-                            id=task_id, description=t_def.get("description", ""),
-                            expected_artifacts=arts, acceptance_criteria=t_def.get("acceptance_criteria", []),
-                            scope_files=scope_files,
+                # Plan sanity check (kernel-side, deterministic).
+                ok, issues = self.validate_plan_draft(plan_data)
+                if not ok:
+                    feedback = "PLAN_REJECTED: " + "; ".join(issues)
+                    logger.warning("[Guardian] Rejecting plan for %s: %s", task.id, feedback)
+                    await session.execute(
+                        sql_update(Task).where(Task.id == task.id).values(
+                            last_review_feedback=feedback[:1000]
                         )
-                        td2 = apply_ingest_scope(td, project_files)
-                        set_task_scope(run_id, task_id, td2.scope_files, td2.protected_files)
-                    except Exception as e:
-                        logger.warning(f"[Guardian] ingest scope wiring failed (non-fatal): {e}")
-
-                for t_def in plan_data.get("tasks", []):
-                    new_task = Task(
-                        id=t_def.get("id", str(uuid.uuid4())),
-                        run_id=run_id,
-                        plan_id=new_plan.id,
-                        description=t_def.get("description", ""),
-                        state="READY",
-                        execution_phase=ExecutionPhase.CODING.value,
-                        assigned_role=t_def.get("role", AssignedRole.CODER.value),
-                        expected_artifacts=t_def.get("expected_artifacts", []),
-                        acceptance_criteria=t_def.get("acceptance_criteria", []),
-                        state_revision=0,
-                        updated_at=datetime.now(timezone.utc)
                     )
-                    session.add(new_task)
-                    _wire_ingest_scope(new_task.id, t_def)
+                    transition_res = TransitionResult(
+                        next_phase=ExecutionPhase.PLANNING,
+                        next_role=AssignedRole.PLANNER,
+                    )
+                else:
+                    # 1. Create the Plan object in DB
+                    new_plan = Plan(
+                        id=str(uuid.uuid4()),
+                        run_id=run_id,
+                        project_id=task.plan.project_id,
+                        version=task.plan.version + 1,
+                        name=plan_data.get("plan_name", "Unnamed Plan"),
+                        status="IN_PROGRESS"
+                    )
+                    session.add(new_plan)
+                    await session.flush()
 
-                # 3. Update the Project to point to the new active plan
-                await session.execute(
-                    sql_update(Project)
-                    .where(Project.id == task.plan.project_id)
-                    .values(active_plan_id=new_plan.id)
-                )
+                    # 2. Create the Tasks defined in the plan
+                    def _wire_ingest_scope(task_id, t_def):
+                        # Phase 2 (Idee A) Step3.3: in ingest mode, derive scope from the
+                        # task's expected_artifacts and fill protected_files deterministically
+                        # (kernel-side policy, NOT the LLM).
+                        try:
+                            from engine.services.ingest_context import get_ingest, set_task_scope
+                            from engine.services.baseline_manifest import load_manifest
+                            from engine.models import TaskDefinition
+                            from engine.services.scope_policy import apply_ingest_scope
+                            ing = get_ingest(run_id)
+                            if not ing:
+                                return
+                            baseline = load_manifest(ing["baseline_path"])
+                            project_files = list(baseline.get("files", {}).keys())
+                            arts = t_def.get("expected_artifacts", []) or []
+                            scope_files = []
+                            for a in arts:
+                                if isinstance(a, dict) and a.get("path"):
+                                    p = a["path"].replace("\\", "/")
+                                    if p not in scope_files:
+                                        scope_files.append(p)
+                            td = TaskDefinition(
+                                id=task_id, description=t_def.get("description", ""),
+                                expected_artifacts=arts, acceptance_criteria=t_def.get("acceptance_criteria", []),
+                                scope_files=scope_files,
+                            )
+                            td2 = apply_ingest_scope(td, project_files)
+                            set_task_scope(run_id, task_id, td2.scope_files, td2.protected_files)
+                        except Exception as e:
+                            logger.warning(f"[Guardian] ingest scope wiring failed (non-fatal): {e}")
 
-                # 4. Mark the Planner task as COMPLETE
-                # WICHTIG: Der Planner selbst geht in den terminalen Phase COMPLETE
-                # (nicht CODING - CODING gilt nur fuer die NEU erzeugten CODER-Tasks).
-                # Sonst bleibt der Planner im Completion-Check haengen.
-                new_state = "VERIFIED"
-                next_phase_val = ExecutionPhase.COMPLETE.value
-                transition_res = TransitionResult(
-                    next_phase=ExecutionPhase.COMPLETE,
-                    next_role=None
-                )
+                    for t_def in plan_data.get("tasks", []):
+                        new_task = Task(
+                            id=t_def.get("id", str(uuid.uuid4())),
+                            run_id=run_id,
+                            plan_id=new_plan.id,
+                            description=t_def.get("description", ""),
+                            state="READY",
+                            execution_phase=ExecutionPhase.CODING.value,
+                            assigned_role=t_def.get("role", AssignedRole.CODER.value),
+                            expected_artifacts=t_def.get("expected_artifacts", []),
+                            acceptance_criteria=t_def.get("acceptance_criteria", []),
+                            state_revision=0,
+                            updated_at=datetime.now(timezone.utc)
+                        )
+                        session.add(new_task)
+                        _wire_ingest_scope(new_task.id, t_def)
+
+                    # 3. Update the Project to point to the new active plan
+                    await session.execute(
+                        sql_update(Project)
+                        .where(Project.id == task.plan.project_id)
+                        .values(active_plan_id=new_plan.id)
+                    )
+
+                    # 4. Mark the Planner task as COMPLETE
+                    # WICHTIG: Der Planner selbst geht in den terminalen Phase COMPLETE
+                    # (nicht CODING - CODING gilt nur fuer die NEU erzeugten CODER-Tasks).
+                    # Sonst bleibt der Planner im Completion-Check haengen.
+                    new_state = "VERIFIED"
+                    next_phase_val = ExecutionPhase.COMPLETE.value
+                    transition_res = TransitionResult(
+                        next_phase=ExecutionPhase.COMPLETE,
+                        next_role=None
+                    )
             elif response.event == TaskEvent.WORKER_TIMEOUT.value:
                 new_state, next_phase_val = await self._evaluate_retry_policy(session, task, response.event)
                 # Update the transition result for the atomic commit
