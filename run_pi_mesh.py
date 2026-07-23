@@ -1065,33 +1065,37 @@ def _web_verifier():
 
 
 def _snake_config() -> Dict[str, Any]:
+    prompt = (
+        "Erstelle eine professionelle, moderne Website für das Open-Source-Projekt \"Firma\".\n\n"
+        "Firma ist ein deterministisches Multi-Agenten-Execution-Framework für Softwareprojekte. "
+        "Es orchestriert autonome KI-Worker (Researcher, Planner, Coder, Reviewer) über ein strukturiertes Task-System "
+        "mit strengen Zustandsmaschinen, zustandslosen Workern, Artefakt-Pipelines und reproduzierbaren Runs.\n\n"
+        "Die Website soll den Eindruck eines durchdachten, technisch anspruchsvollen Open-Source-Projekts vermitteln, "
+        "nicht den einer Hobby-Bastelbude. Sie soll schick, vertrauenswürdig und informativ sein und einen klaren roten Faden haben.\n\n"
+        "Bitte liefere eine vollständige, produktionsreife Website mit mindestens folgenden Inhalten:\n"
+        "- Hero-Bereich mit klarer Projektpositionierung\n"
+        "- Architektur/Workflow-Uebersicht (Researcher, Planner, Coder, Reviewer, Guardian, Orchestrator)\n"
+        "- Features/Staerken (Determinismus, Reproduzierbarkeit, Read-only-Worker, Artefakt-Tracking, Auditing)\n"
+        "- Einsatzzweck/Nutzen\n"
+        "- Projektstatus/Reife (Meilensteine, lauffaehige Pipeline)\n"
+        "- Installations-/Startabschnitt\n"
+        "- Vertrauenselemente (Governance, nachvollziehbare Runs)\n\n"
+        "Gestalterisch soll die Seite professionell und modern wirken: klare visuelle Hierarchie, gute Typografie, "
+        "ruhige Tiefe, kein ueberladener Slider-Kram. Sie soll auf Mobilgeraeten und Desktop gleichermassen funktionieren.\n\n"
+        "Technische Rahmenbedingungen:\n"
+        "- Plain HTML/CSS/JS, keine Build-Tools, keine externen Frameworks\n"
+        "- Es muessen genau diese Dateien entstehen: index.html, style.css, app.js\n"
+        "- Die Seite muss durch Oeffnen von index.html im Browser funktionsfaehig bleiben\n"
+        "- Barrierefreiheit und Ladezeit beachten\n\n"
+        "Return ONLY the JSON object."
+    )
+    extra = os.environ.get("FIRMA_PLANNER_EXTRA_INSTRUCTION")
+    if extra:
+        prompt += "\n\n" + extra
     return {
         "project_name": "Firma Project Website (PiMesh)",
         "plan_name": "Professional Firma Website",
-        "prompt": (
-            "Erstelle eine professionelle, moderne Website für das Open-Source-Projekt \"Firma\".\n\n"
-            "Firma ist ein deterministisches Multi-Agenten-Execution-Framework für Softwareprojekte. "
-            "Es orchestriert autonome KI-Worker (Researcher, Planner, Coder, Reviewer) über ein strukturiertes Task-System "
-            "mit strengen Zustandsmaschinen, zustandslosen Workern, Artefakt-Pipelines und reproduzierbaren Runs.\n\n"
-            "Die Website soll den Eindruck eines durchdachten, technisch anspruchsvollen Open-Source-Projekts vermitteln, "
-            "nicht den einer Hobby-Bastelbude. Sie soll schick, vertrauenswürdig und informativ sein und einen klaren roten Faden haben.\n\n"
-            "Bitte liefere eine vollständige, produktionsreife Website mit mindestens folgenden Inhalten:\n"
-            "- Hero-Bereich mit klarer Projektpositionierung\n"
-            "- Architektur/Workflow-Uebersicht (Researcher, Planner, Coder, Reviewer, Guardian, Orchestrator)\n"
-            "- Features/Staerken (Determinismus, Reproduzierbarkeit, Read-only-Worker, Artefakt-Tracking, Auditing)\n"
-            "- Einsatzzweck/Nutzen\n"
-            "- Projektstatus/Reife (Meilensteine, lauffaehige Pipeline)\n"
-            "- Installations-/Startabschnitt\n"
-            "- Vertrauenselemente (Governance, nachvollziehbare Runs)\n\n"
-            "Gestalterisch soll die Seite professionell und modern wirken: klare visuelle Hierarchie, gute Typografie, "
-            "ruhige Tiefe, kein ueberladener Slider-Kram. Sie soll auf Mobilgeraeten und Desktop gleichermassen funktionieren.\n\n"
-            "Technische Rahmenbedingungen:\n"
-            "- Plain HTML/CSS/JS, keine Build-Tools, keine externen Frameworks\n"
-            "- Es muessen genau diese Dateien entstehen: index.html, style.css, app.js\n"
-            "- Die Seite muss durch Oeffnen von index.html im Browser funktionsfaehig bleiben\n"
-            "- Barrierefreiheit und Ladezeit beachten\n\n"
-            "Return ONLY the JSON object."
-        ),
+        "prompt": prompt,
         "expected_artifacts": ["index.html", "style.css", "app.js"],
         "acceptance_criteria": [
             "EXISTS:index.html",
