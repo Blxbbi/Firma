@@ -2,7 +2,7 @@
 
 > Zusammenfassung einer umfassenden Bestandsaufnahme von Kernel, Sandbox, Workern,
 > Messaging, Tests und Start-Mechanismus.  
-> Datum: 2026-07-19  
+> Datum: 2026-07-23  
 > Fokus: Was haben wir? Was fehlt? Was ist die Priorität?
 
 ---
@@ -47,7 +47,7 @@ Der Begriff **Kernel** bezeichnet in Firma kein einzelnes Modul `kernel.py`, son
 
 **Stärke:** Die Engine ist das beste Stück des Systems. Die Konzepte (CAS, FSM, Guardian, Sovereignty) sind extrem sauber umgesetzt.
 
-**Luft nach oben:** Bessere Observability (Metrics, Tracing), Performance-Regressionstests und ein stabiler E2E-Loop mit echtem LLM durch alle Phasen.
+**Luft nach oben:** Bessere Observability (Metrics, Tracing), Performance-Regressionstests.
 
 ---
 
@@ -108,7 +108,7 @@ Die Worker sind **keine denkenden Agenten, sondern gebundene Werkzeuge** des Ker
 | **FlightWorker** | Brücke | Sehr eng | ✅ Fertig | Flight Program |
 | **Researcher** | LLM | Stark | 🔄 MVP/Stub | Gut für Scope, Citations erzwingen |
 | **Auditor** | Keine (deterministisch) | Post-run | ✅ Fertig | Exzellent, kein LLM |
-| **Reviewer** | LLM | Stark | ❌ Fehlt | Schwächstes Glied |
+| **Reviewer** | LLM | Stark | ✅ Optimiert | Single-Pass-Validator |
 | **Verifier (Rolle)** | Keine (deterministisch) | Engine-seitig | ✅ Fertig | Richtig so |
 | **Planner** | LLM | Stark | 🔄 MVP | Funktioniert, Plan-Qualität kritisch |
 
@@ -152,8 +152,9 @@ Die Worker sind **keine denkenden Agenten, sondern gebundene Werkzeuge** des Ker
 - ✅ Exzellent designed
 - ✅ Sehr praktisch für Debugging und Compliance
 - ✅ Keine Magie, nur hard numbers
+- ✅ Tool-Usage-Tracking integriert (seit 2026-07-23)
 
-**Luft nach oben:** Fast keine. Vielleicht mehr Sections (z.B. Token-Verbrauch pro Worker, Latenz-Histogramme).
+**Luft nach oben:** Fast keine. Vielleicht mehr Sections (z.B. Latenz-Histogramme).
 
 ---
 
@@ -161,12 +162,19 @@ Die Worker sind **keine denkenden Agenten, sondern gebundene Werkzeuge** des Ker
 
 **Was er ist:** LLM-basierter Qualitätsprüfer. Soll Code gegen Original-Anforderungen prüfen.
 
-**Bewertung:**
-- ❌ Das **schwächste Glied** im System
-- Keine deterministische Review-Logik — LLM entscheidet subjektiv
-- Keine Integration mit Verifier-Ergebnissen
-- Keine Retry-Scrub-Logik für Reviewer-Feedback
-- Redundant zum Verifier, aber unsicherer
+**Bewertung (Stand 2026-07-23):**
+- ✅ **Nicht mehr das schwächste Glied** — massiv optimiert
+- ✅ ONE-PASS-Validator: Keine Iteration, keine Code-Änderungen
+- ✅ Tool-Restriktion: Nur `read, write` (kein `bash`, kein `edit`)
+- ✅ Selektives Artifact-Loading basierend auf `expected_artifacts` statt „alle laden“
+- ✅ Kernel-seitige Reparatur von Timestamp-Schema-Bugs
+- ✅ Metriken belegen: **1.519 → 4 Turns**, **1,23M → 152k Tokens** (task-1)
+
+**Was bleibt kritisch:**
+- ❌ Keine deterministische Review-Logik — LLM entscheidet subjektiv
+- ❌ Keine Integration mit Verifier-Ergebnissen
+- ❌ Keine Retry-Scrub-Logik für Reviewer-Feedback
+- ❌ Redundant zum Verifier, aber unsicherer
 
 **Luft nach oben:** Entweder durch deterministische Checks ersetzen (AST, Complexity, Linter) oder den Prompt massiv härten mit konkreten Checklisten und "FAIL bei X/Y/Z"-Regeln.
 
@@ -193,9 +201,39 @@ Die Worker sind **keine denkenden Agenten, sondern gebundene Werkzeuge** des Ker
 - ✅ Plan-Struktur ist klar
 - ✅ SpecGate prüft Pläne vor Annahme (Duplikate, Zyklen, ungültige Rollen)
 - ❌ Keine Plan-Qualitäts-Validierung im Runtime (Task-Größe, Testbarkeit)
-- ❌ Planner hat **keinen Zugriff auf Research-Brief** des Researchers — plant blind
+- ❌ **Planner hat keinen Zugriff auf Research-Brief des Researchers — plant blind** → siehe [§3.5.1](#351-planner--research-brief)
+- ❌ Task-Größen-Limit im SpecGate fehlt
 
-**Luft nach oben:** Research-Brief als Teil des Planner-Prompts injizieren oder Planner die Research-Artefakte lesen lassen. Task-Größen-Limit im SpecGate.
+##### 3.5.1 Planner + Research-Brief
+
+**Das Problem:**
+
+Der Planner erhält aktuell **nur den ursprünglichen Request/Goal**. Wenn ein `RESEARCHER` vorher Recherche betreibt (z. B. Projektstruktur analysieren, existierende Dateien scannen, Abhängigkeiten finden), werden diese Ergebnisse **nicht an den Planner weitergegeben**.
+
+**Konsequenz:**
+- Der Planner erstellt Tasks „blind“
+- Er weiß nicht, welche Dateien bereits existieren
+- Er plant keine sequentiellen Abhängigkeiten auf Basis echter Projektstruktur
+- Tasks werden redundant oder überschneiden sich
+
+**Beispiel:**
+```
+User-Request: "Bau mir ein Snake-Spiel"
+
+1. RESEARCHER scannt Projekt → findet keine Game-Logik
+                         → schreibt research/brief.md mit korrekten Pfaden
+
+2. PLANNER bekommt NUR "Bau mir ein Snake-Spiel"
+                         → weiß nichts vom Research-Brief
+                         → plant Tasks möglicherweise mit falschen Annahmen
+```
+
+**Lösung:**
+- Research-Brief als Teil des Planner-Prompts injizieren
+- Oder: Planner erhält `research/brief.md` als Input-Context
+- Task-Größen-Limit im SpecGate erzwingen
+
+**Priorität:** HOCH — schlechte Pläne führen zu schlechten Runs.
 
 ---
 
@@ -203,9 +241,10 @@ Die Worker sind **keine denkenden Agenten, sondern gebundene Werkzeuge** des Ker
 
 ### Was wir haben
 
-- **49 Testdateien**, ~7000 Zeilen Testcode
+- **~50 Testdateien**, ~7000 Zeilen Testcode
 - Test-Pyramide: Unit, Integration, E2E, Chaos, Contract, Security
 - Abdeckung: Guardian, FSM, CAS, Concurrency, Scope, Baseline, Sandbox, Transport, Worker-Binding
+- **Echte E2E-Runs mit LLM erfolgreich** (siehe Meilenstein `reviewer_optimization_and_backup_2026-07-23`)
 
 ### Bewertung
 
@@ -215,20 +254,18 @@ Die Worker sind **keine denkenden Agenten, sondern gebundene Werkzeuge** des Ker
 | Chaos/Stress-Testing | ⭐⭐⭐⭐⭐ |
 | Test-Diversität | ⭐⭐⭐⭐⭐ |
 | Pytest-Integration | ⭐⭐☆☆☆ |
-| E2E-LLM-Tests | ⭐⭐☆☆☆ |
 | Performance-Regression | ⭐☆☆☆☆ |
 
 **Ist das übertrieben?** — **Nein.** Für ein deterministisches System mit harten Garantien sind Tests die primäre Währung von Vertrauen. Die Tests sind **nicht übertrieben, sondern sogar noch zu wenig** in Bereichen, die für Produktion kritisch sind.
 
 ### Wo Luft nach oben ist
 
-1. **Keine echten E2E-Tests mit echtem LLM** — fast alle Tests nutzen MockLLM/DummyWorker/StubWorker
-2. **Keine Performance-Regressionstests** — 500ms-Tick-Loop darf nicht durch Code-Änderung explodieren
-3. **Keine Docker-Sandbox-Tests** — sobald Container-Isolation da ist, brauchst du Tests dafür
-4. **Keine Langzeit-Stabilitätstests** — was passiert bei 1000+ Ticks? Memory-Leaks?
-5. **Keine Pytest-Integration / CI** — Tests sind Standalone-Skripte, keine fixtures, kein CI-Runner
+1. **Keine Performance-Regressionstests** — 500ms-Tick-Loop darf nicht durch Code-Änderung explodieren
+2. **Keine Docker-Sandbox-Tests** — sobald Container-Isolation da ist, brauchst du Tests dafür
+3. **Keine Langzeit-Stabilitätstests** — was passiert bei 1000+ Ticks? Memory-Leaks?
+4. **Keine Pytest-Integration / CI** — Tests sind Standalone-Skripte, keine fixtures, kein CI-Runner
 
-**Priorität:** MITTEL — die Unit/Integration/Chaos-Tests sind exzellent, aber für Produktion brauchst du E2E-LLM + Performance.
+**Priorität:** MITTEL — die Unit/Integration/Chaos-Tests sind exzellent, aber für Produktion brauchst du Performance + CI.
 
 ---
 
@@ -304,7 +341,7 @@ Die Prompts werden **dynamisch in `_build_spec_markdown()`** generiert (`engine/
 
 #### PLANNER
 - ✅ Hartes JSON-Schema, kein Code-Schreiben erlaubt
-- ❌ Kein Zugriff auf Research-Brief — plant blind
+- ❌ Kein Zugriff auf Research-Brief — plant blind → siehe [§3.5.1](#351-planner--research-brief)
 
 #### CODER
 - ✅ Klare Scope-Begrenzung ("ausschließlich diese Task")
@@ -320,21 +357,21 @@ Die Prompts werden **dynamisch in `_build_spec_markdown()`** generiert (`engine/
 - ❌ Citations werden **nicht technisch verifiziert** — LLM könnte sie erfinden
 
 #### REVIEWER
-- ❌ **Das schwächste Prompt** — LLM-basierte Qualitätsprüfung ohne deterministische Checks
+- ✅ ** massiv optimiert** — ONE-PASS-Validator, Tool-Restriktion auf `read, write`
 - ❌ Keine Checkliste, kein Scoring, kein Bezug zu Verifier-Ergebnissen
 - ❌ Keine Retry-Scrub-Logik für Reviewer-Feedback
 - ❌ Redundant zum Verifier, aber unsicherer
 
 ### Bewertung
 
-| Rolle | Prompt-Qualität | Sicherheit | Priorität |
+| Rolle | Prompt-Qualität | Sicherheit | Status |
 |---|---|---|---|
-| CODER | ⭐⭐⭐⭐☆ | ⭐⭐⭐☆☆ | MITTEL |
-| RESEARCHER | ⭐⭐⭐⭐⭐ | ⭐⭐⭐☆☆ | HOCH |
-| PLANNER | ⭐⭐⭐☆☆ | ⭐⭐⭐⭐☆ | HOCH |
-| REVIEWER | ⭐⭐☆☆☆ | ⭐⭐☆☆☆ | HOCH |
+| CODER | ⭐⭐⭐⭐☆ | ⭐⭐⭐☆☆ | Stabil |
+| RESEARCHER | ⭐⭐⭐⭐⭐ | ⭐⭐⭐☆☆ | Gut, Citations unverifiziert |
+| PLANNER | ⭐⭐⭐☆☆ | ⭐⭐⭐⭐☆ | Kritisch: Research-Brief fehlt |
+| REVIEWER | ⭐⭐⭐⭐☆ | ⭐⭐⭐⭐☆ | Stabil, optimiert |
 
-**Priorität:** Den **Reviewer-Prompt härten** oder durch deterministische Checks ersetzen. Dann **Planner** den Research-Brief lesen lassen. Dann **CitationVerifier** für Researcher bauen.
+**Priorität:** **Planner** Research-Brief injizieren. Dann **CitationVerifier** für Researcher bauen.
 
 ---
 
@@ -360,7 +397,7 @@ Die Prompts werden **dynamisch in `_build_spec_markdown()`** generiert (`engine/
 - Tasks werden dispatched (Task-Files werden geschrieben)
 - **ES LÄUFT KEIN WORKER** → Tasks timeouten → Run terminiert nie sauber
 
-Die Doku (`docs/Startup.md`) warnt explizit davor — aber es gibt **keine technische Hürde**, die das verhindert.
+Die Doku (`docs/guides/Startup.md`) warnt explizit davor — aber es gibt **keine technische Hürde**, die das verhindert.
 
 ### ENV-Steuerung
 
@@ -374,6 +411,7 @@ Sehr mächtig und flexibel:
 | `FIRMA_SESSION_MODE` | `off` vs `task` vs `persona_base` |
 | `FIRMA_MAX_CONCURRENT_SPAWNS` | Rate-Limit-Schutz für Free-Tier |
 | `FIRMA_MODEL_*` | Optional: Modell für PLANNER/CODER/REVIEWER erzwingen |
+| `FIRMA_RESEARCH_WEB` | Researcher-Web-Recherche aktivieren |
 
 ### Bewertung
 
@@ -403,16 +441,22 @@ Firma ist eine **exzellent gebaute deterministische Engine-Infrastruktur**, die 
 
 Das System ist aktuell ein **MVP/Prototyp auf sehr hohem Niveau** — keine fertige Produktion, aber die Architektur ist solide genug, um darauf aufzubauen.
 
+### Was neu hinzugekommen ist (seit 2026-07-19)
+
+- ✅ **Reviewer-Optimierung abgeschlossen:** 4 Turns, 152k Tokens, Tool-Policies, ONE-PASS-Vertrag
+- ✅ **GitHub-Backup:** Sauberer Branch `clean-backup-2` ohne historische Secrets
+- ✅ **Meilenstein dokumentiert:** `milestones/reviewer_optimization_and_backup_2026-07-23`
+- ✅ **Docs-Struktur:** Neu geordnet in `decisions/`, `guides/`, `plans/`, `vision/`, `meta/`, `briefings/`
+- ✅ **Phase-4-Auditor erweitert:** Tool-Usage-Tracking + Policy-Checks
+
 ### Priorisierte To-Dos
 
 | Priorität | Thema | Maßnahme | Aufwand |
 |---|---|---|---|
 | 🔴 **HOCH** | Sandbox-Sicherheit | Docker-Sandbox als zweite `SandboxExecutor`-Implementierung (`--network none`, read-only Mounts) | Mittel |
-| 🔴 **HOCH** | Reviewer | Prompt härten ODER durch deterministische Checks ersetzen (AST, Complexity, Linter) | Mittel |
-| 🔴 **HOCH** | Planner + Research | Planner bekommt Research-Brief; Research-Citations werden verifiziert | Mittel |
-| 🟡 **MITTEL** | Start/UX | Einziger Entry-Point + CLI (`firma run/status/stop/logs`) | Hoch |
+| 🔴 **HOCH** | Planner + Research | Planner bekommt Research-Brief; Task-Größen-Limit im SpecGate | Mittel |
 | 🟡 **MITTEL** | Resume/Rollback | Save-State + `firma resume <run_id>` | Hoch |
-| 🟡 **MITTEL** | E2E-LLM-Tests | Echte LLM-Worker durch alle Phasen testen | Hoch |
+| 🟡 **MITTEL** | Start/UX | Einziger Entry-Point + CLI (`firma run/status/stop/logs`) | Hoch |
 | 🟡 **MITTEL** | Performance-Tests | Automatisierte Latenz-Regressionstests für Tick-Loop | Mittel |
 | 🟢 **NIEDRIG** | Docker-Sandbox-Tests | Tests für Container-Isolation, falls Docker da ist | Mittel |
 | 🟢 **NIEDRIG** | Langzeit-Stabilität | 1000+ Tick-Run ohne Memory-Leak | Niedrig |
@@ -426,14 +470,16 @@ Das System ist aktuell ein **MVP/Prototyp auf sehr hohem Niveau** — keine fert
 - ✅ Auditor (Phase 4) — LLM-free, deterministisch, nützlich
 - ✅ Transport-Abstraktion (Engine unabhängig von NATS/Disk/Queue)
 - ✅ Chaos/Stress/Evil-Worker-Tests
-- ✅ Doku (`docs/Startup.md`, `docs/Verständnis.md`)
+- ✅ Reviewer-Tool-Restriktion + ONE-PASS-Vertrag
+- ✅ Tool-Policies als Architektur-Invariante dokumentiert
+- ✅ Doku (`docs/guides/Startup.md`, `docs/vision/Verständnis.md`)
 
 ### Was am dringendsten repariert werden muss
 
 1. **Sandbox ist kein Gefängnis** — Worker-Code läuft mit deinen Rechten. Docker/VM-Isolation ist Pflicht, sobald du mit echten LLMs arbeitest.
-2. **Reviewer ist ein schwaches Glied** — LLM-basierte Qualitätsprüfung ohne deterministische Checks ist ein Risiko.
-3. **Planner plant blind** — ohne Research-Brief fehlt ihm Kontext, was zu schlechten Plänen führt.
-4. **Kein Resume** — wenn ein Run abbricht, ist er weg. Kein Save-State, kein Continue.
+2. **Planner plant blind** — ohne Research-Brief fehlt ihm Kontext, was zu schlechten Plänen führt.
+3. **Kein Resume** — wenn ein Run abbricht, ist er weg. Kein Save-State, kein Continue.
+4. **Kein kanonischer Entry-Point** — Nutzer müssen wissen, welche Datei sie starten müssen.
 
 ### Was die Firma richtig gemacht hat
 
@@ -441,6 +487,7 @@ Das System ist aktuell ein **MVP/Prototyp auf sehr hohem Niveau** — keine fert
 - **Trust-Zero:** Keine Nachricht wird ohne Guardian-Validierung verarbeitet.
 - **Fail-Fast:** Sobald eine Regel verletzt wird, bricht das System ab.
 - **Push-only:** Kontext wird vom Kernel an Worker gepusht, nicht vom Worker gezogen.
+- **Tool-Policies nach Rolle** — Reviewer kriegt nur `read, write`, Coder kriegt `edit`, Researcher kein `bash` ohne Freigabe.
 
 ---
 
@@ -448,9 +495,10 @@ Das System ist aktuell ein **MVP/Prototyp auf sehr hohem Niveau** — keine fert
 
 | Thema | Datei |
 |---|---|
-| Start-Anleitung | `docs/Startup.md` |
-| Verständnis Architektur | `docs/Verständnis.md` |
-| Vision & Invarianten | `docs/Vision_Inkrementell_Researcher_Auditor.md` |
+| Start-Anleitung | `docs/guides/Startup.md` |
+| Verständnis Architektur | `docs/vision/Verständnis.md` |
+| Vision & Invarianten | `docs/vision/Vision_Inkrementell_Researcher_Auditor.md` |
+| Tool-Policies | `docs/vision/PiMesh_Architektur.md §9.1` |
 | Orchestrator (Tick-Loop) | `engine/orchestrator.py` |
 | Guardian (9-Step) | `engine/services/guardian.py` |
 | Governance (FSM) | `engine/governance.py` |
