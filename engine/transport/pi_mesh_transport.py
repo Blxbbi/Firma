@@ -260,13 +260,20 @@ class PiMeshTransport(WorkerTransport):
                 "Schreibe `research/brief.md` MIT folgenden Abschnitten:\n"
                 "```\n"
                 "# Research Brief\n\n"
-                "## Project findings (with citations)\n"
+                "## User Goal (PRIMARY)\n"
+                "<Der User-Auftrag, exakt wie oben im Assignment. Das ist deine Hauptfragestellung.>\n\n"
+                "## Project Findings\n"
                 "<was im Code steht, mit file:/line:/evidence: Referenzen>\n\n"
-                "## Recommendations for planner\n"
+                "## Recommendations for Planner\n"
                 "<konkrete Vorschläge, wo anfassen, welche Dateien, welche Technologien>\n\n"
-                "## Risks/constraints\n"
+                "## Risks/Constraints\n"
                 "<was zu beachten ist, welche Dateien geschützt sind, welche Constraints>\n"
                 "```\n\n"
+                "### Primary-Input Vertrag\n"
+                "- Dein Brief leitet sich AUS dem User-Auftrag ab, nicht aus Vorannahmen.\n"
+                "- Beginne `research/brief.md` mit dem User Goal.\n"
+                "- Wenn der User eine Website will, dann explorierst du danach;\n"
+                "  nicht nach irgendwelchen festen Snake/Spiel-Vorgaben.\n\n"
                 "### Read-only (HART)\n"
                 "- Du änderst KEINE Projektdatei.\n"
                 "- Du schreibst NUR `research/brief.md`.\n"
@@ -284,6 +291,13 @@ class PiMeshTransport(WorkerTransport):
             parts.append(
                 "Du darfst NUR die in `task_definition` genannten Dateien anfassen "
                 "(keine weiteren Dateien schreiben).\n\n"
+            )
+            parts.append("## ONE-PASS Contract (V1)\n")
+            parts.append(
+                "- Erlaubt: `read` NUR VOR dem ersten `write` (Task-Spec + staged Projektdateien).\n"
+                "- Verboten: `read` NACH dem ersten `write`, `bash`, `edit`.\n"
+                "- Wenn du denkst, du musst iterieren → beende mit `TASK_FAILED` + Grund.\n"
+                "- Abschluss: alle geforderten Dateien schreiben, dann `worker_response` schreiben und sofort stoppen.\n\n"
             )
             # F4: ingest mode -> tell the worker where the existing project lives.
             try:

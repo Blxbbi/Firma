@@ -231,6 +231,35 @@ def test_spec_prompt_fixes_1_to_4():
     print("PASS: spec prompt fixes 1-4 applied (no JSON-return, scope split, MUST-PASS criteria, no game.js)")
 
 
+def test_coder_one_pass_contract_in_spec():
+    root = tempfile.mkdtemp()
+    t = PiMeshTransport(crew_cwds=CREWS, project_root=root)
+    payload = {
+        "event": "TASK_ASSIGNMENT",
+        "run_id": "run-X",
+        "task_id": "task-1",
+        "role": "CODER",
+        "state_revision": 5,
+        "prompt": "make website",
+        "task_definition": {
+            "description": "Implement style.css",
+            "expected_artifacts": [{"path": "style.css", "type": "CREATE"}],
+            "acceptance_criteria": ["EXISTS:style.css"],
+        },
+    }
+    asyncio.run(t.dispatch(payload))
+    md = open(os.path.join(root, CREWS["CODER"], ".pi", "messenger", "crew", "tasks", "task-1.md"), encoding="utf-8").read()
+
+    assert "ONE-PASS Contract (V1)" in md
+    assert "`read` NUR VOR dem ersten `write`" in md
+    assert "`read` NACH dem ersten `write`" in md
+    assert "`bash`" in md
+    assert "`edit`" in md
+    assert "TASK_FAILED" in md
+    assert "worker_response" in md
+    print("PASS: CODER spec contains ONE-PASS contract rules")
+
+
 if __name__ == "__main__":
     test_dispatch_writes_task_files()
     test_receiver_inlines_and_dedupes()
@@ -239,4 +268,5 @@ if __name__ == "__main__":
     test_persona_responses_publish()
     test_schema_violation_event_roman()
     test_spec_prompt_fixes_1_to_4()
+    test_coder_one_pass_contract_in_spec()
     print("\nALL TESTS PASSED")
