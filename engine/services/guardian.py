@@ -556,6 +556,8 @@ class GuardianPipeline:
                             last_review_feedback=feedback[:1000]
                         )
                     )
+                    new_state = "READY"
+                    next_phase_val = ExecutionPhase.PLANNING.value
                     transition_res = TransitionResult(
                         next_phase=ExecutionPhase.PLANNING,
                         next_role=AssignedRole.PLANNER,
