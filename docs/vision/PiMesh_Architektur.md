@@ -288,6 +288,7 @@ Alle Felder sind **exakt** aus dem heutigen Code (`engine/models.py`, `engine/sc
 | **Schema / Protocol violation** | `SUBMISSION_INVALID_SCHEMA` | `PROTOCOL_VIOLATION` | Guardian → Retry / Fail (deterministisch gemappt) |
 | **Worker-Exception (Code)** | `TASK_FAILED` | `WORKER_EXCEPTION` | Guardian → Retry / Fail |
 | **Inhaltlich falsch (Verifier)** | `VERIFY_FAILURE` | – | Guardian → Retry (neuer Versuch, frischer Kontext) |
+| **Plan ungültig (Guardian)** | `PLAN_REJECTED` | `PLAN_VALIDATION_FAILED` | Guardian → Retry (verbraucht `attempt_count`; bei `>= MAX_ITERATIONS` → `FAILED_ITERATION_LIMIT`) |
 | **Inhaltlich falsch (Reviewer)** | `REVIEW_FAILURE` | – | Guardian → Retry |
 
 > **WICHTIG:** Struktur-Bruch und Logik-Bruch sind getrennte Kanäle. Nicht zwei parallele Pfade für denselben Fehler – sonst werden Metriken/Recovery-Regeln unscharf.

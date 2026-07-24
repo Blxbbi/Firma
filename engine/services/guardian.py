@@ -551,17 +551,30 @@ class GuardianPipeline:
                 if not ok:
                     feedback = "PLAN_REJECTED: " + "; ".join(issues)
                     logger.warning("[Guardian] Rejecting plan for %s: %s", task.id, feedback)
-                    await session.execute(
-                        sql_update(Task).where(Task.id == task.id).values(
-                            last_review_feedback=feedback[:1000]
+                    task.attempt_count += 1
+                    if task.attempt_count >= self.MAX_ITERATIONS:
+                        logger.error(
+                            "[Guardian] Planner %s exceeded max iterations (%s) after %s rejections. Marking FAILED.",
+                            task.id, self.MAX_ITERATIONS, task.attempt_count,
                         )
-                    )
-                    new_state = "READY"
-                    next_phase_val = ExecutionPhase.PLANNING.value
-                    transition_res = TransitionResult(
-                        next_phase=ExecutionPhase.PLANNING,
-                        next_role=AssignedRole.PLANNER,
-                    )
+                        new_state = "FAILED"
+                        next_phase_val = ExecutionPhase.FAILED_ITERATION_LIMIT.value
+                        transition_res = TransitionResult(
+                            next_phase=ExecutionPhase.FAILED_ITERATION_LIMIT,
+                            next_role=None,
+                        )
+                    else:
+                        await session.execute(
+                            sql_update(Task).where(Task.id == task.id).values(
+                                last_review_feedback=feedback[:1000]
+                            )
+                        )
+                        new_state = "READY"
+                        next_phase_val = ExecutionPhase.PLANNING.value
+                        transition_res = TransitionResult(
+                            next_phase=ExecutionPhase.PLANNING,
+                            next_role=AssignedRole.PLANNER,
+                        )
                 else:
                     # 1. Create the Plan object in DB
                     new_plan = Plan(

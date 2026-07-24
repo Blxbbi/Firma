@@ -95,33 +95,86 @@ class TestGuardianPlanRejection:
         # Valid plan updates projects.active_plan_id, not tasks.last_review_feedback
         task_updates = self._task_update_calls()
         assert len(task_updates) == 0
+        assert self.task.attempt_count == 0
 
     def test_plan_with_empty_tasks_is_rejected(self):
-        payload = self._payload([])
-        success, message = self._run(payload)
-        assert success is True
-        # Rejection sets last_review_feedback on the Task
-        task_updates = self._task_update_calls()
-        assert len(task_updates) == 1
-        assert "last_review_feedback" in str(task_updates[0])
+        original_max = GuardianPipeline.MAX_ITERATIONS
+        try:
+            GuardianPipeline.MAX_ITERATIONS = 2
+            payload = self._payload([])
+            success, message = self._run(payload)
+            assert success is True
+            # Rejection sets last_review_feedback on the Task
+            task_updates = self._task_update_calls()
+            assert len(task_updates) == 1
+            assert "last_review_feedback" in str(task_updates[0])
+            # attempt_count must be incremented on rejection
+            assert self.task.attempt_count == 1
+        finally:
+            GuardianPipeline.MAX_ITERATIONS = original_max
 
     def test_plan_with_coder_task_without_artifacts_is_rejected(self):
-        payload = self._payload([
-            {"id": "task-1", "description": "do it", "role": "CODER", "expected_artifacts": [], "acceptance_criteria": []},
-        ])
-        success, message = self._run(payload)
-        assert success is True
-        task_updates = self._task_update_calls()
-        assert len(task_updates) == 1
-        assert "last_review_feedback" in str(task_updates[0])
+        original_max = GuardianPipeline.MAX_ITERATIONS
+        try:
+            GuardianPipeline.MAX_ITERATIONS = 2
+            payload = self._payload([
+                {"id": "task-1", "description": "do it", "role": "CODER", "expected_artifacts": [], "acceptance_criteria": []},
+            ])
+            success, message = self._run(payload)
+            assert success is True
+            task_updates = self._task_update_calls()
+            assert len(task_updates) == 1
+            assert "last_review_feedback" in str(task_updates[0])
+            assert self.task.attempt_count == 1
+        finally:
+            GuardianPipeline.MAX_ITERATIONS = original_max
 
     def test_plan_with_too_many_tasks_is_rejected(self):
-        payload = self._payload([
-            {"id": f"t{i}", "description": "do it", "role": "CODER", "expected_artifacts": [{"path": "x.py", "type": "CREATE"}], "acceptance_criteria": []}
-            for i in range(6)
-        ])
-        success, message = self._run(payload)
-        assert success is True
-        task_updates = self._task_update_calls()
-        assert len(task_updates) == 1
-        assert "last_review_feedback" in str(task_updates[0])
+        original_max = GuardianPipeline.MAX_ITERATIONS
+        try:
+            GuardianPipeline.MAX_ITERATIONS = 2
+            payload = self._payload([
+                {"id": f"t{i}", "description": "do it", "role": "CODER", "expected_artifacts": [{"path": "x.py", "type": "CREATE"}], "acceptance_criteria": []}
+                for i in range(6)
+            ])
+            success, message = self._run(payload)
+            assert success is True
+            task_updates = self._task_update_calls()
+            assert len(task_updates) == 1
+            assert "last_review_feedback" in str(task_updates[0])
+            assert self.task.attempt_count == 1
+        finally:
+            GuardianPipeline.MAX_ITERATIONS = original_max
+
+    def test_plan_reject_increments_attempt_count(self):
+        """Explicit test: PLAN_REJECTED consumes retry budget."""
+        original_max = GuardianPipeline.MAX_ITERATIONS
+        try:
+            GuardianPipeline.MAX_ITERATIONS = 2
+            self.task.attempt_count = 0
+            payload = self._payload([])
+            success, message = self._run(payload)
+            assert success is True
+            assert self.task.attempt_count == 1
+        finally:
+            GuardianPipeline.MAX_ITERATIONS = original_max
+
+    def test_planner_stops_after_max_iterations_on_rejects(self):
+        """Planner task fails after MAX_ITERATIONS rejections."""
+        original_max = GuardianPipeline.MAX_ITERATIONS
+        try:
+            GuardianPipeline.MAX_ITERATIONS = 2
+            self.task.attempt_count = 1  # already failed once
+            
+            payload = self._payload([])
+            success, message = self._run(payload)
+            assert success is True
+            assert self.task.attempt_count == 2
+            # After hitting max iterations, the task should transition to FAILED
+            # The mock transition_task_atomic is called with new_state="FAILED"
+            # We verify this by checking that last_review_feedback is NOT set (no retry)
+            task_updates = self._task_update_calls()
+            # When limit is reached, we don't update last_review_feedback (no retry)
+            assert len(task_updates) == 0
+        finally:
+            GuardianPipeline.MAX_ITERATIONS = original_max
