@@ -205,11 +205,36 @@ class PiProvider:
         os.makedirs(os.path.dirname(prompt_file), exist_ok=True)
         with open(prompt_file, "w", encoding="utf-8") as f:
             f.write(prompt)
-        # Short, deterministic prompt referencing the file.
+
+        # Inline-Fallback fuer den Fall, dass `read()` im pi-Tool-Layer kaputt ist
+        # (z.B. `.pad=`-Bug bei Argument-Serialization). Der Worker bekommt dann die
+        # kritischen Infos direkt im Prompt und kann ohne Dateizugriff arbeiten.
+        inline_fallback = ""
+        task_md_path = os.path.join(crew_cwd, ".pi", "messenger", "crew", "tasks", f"{task_id}.md")
+        if os.path.isfile(task_md_path):
+            try:
+                with open(task_md_path, "r", encoding="utf-8") as f:
+                    task_md_content = f.read()
+                inline_fallback = (
+                    f"\n\n"
+                    f"[INLINE ASSIGNMENT FALLBACK]\n"
+                    f"If you cannot read the prompt file above, use this inline assignment.\n"
+                    f"Do NOT call any read/write/edit/bash tools on `.pi/work/` or `.pi/messenger/crew/tasks/` "
+                    f"if they fail with path corruption (e.g. `.pad=`). Follow the instructions below directly.\n\n"
+                    f"--- FULL PROMPT ---\n"
+                    f"{prompt}\n\n"
+                    f"--- TASK SPEC ({task_id}.md) ---\n"
+                    f"{task_md_content}\n"
+                    f"[END INLINE ASSIGNMENT FALLBACK]"
+                )
+            except Exception:
+                inline_fallback = ""
+
         short_prompt = (
             f"Read your complete assignment from `.pi/work/{run_id}/{task_id}/prompt.txt` "
             f"in the current working directory and follow it EXACTLY. "
             f"Do not ask questions and do not call any mesh/pi_messenger tools."
+            f"{inline_fallback}"
         )
         # Per-task log to avoid collision across concurrent spawns.
         log_path = os.path.join(crew_cwd, ".pi", "work", run_id, task_id, "worker.log")
