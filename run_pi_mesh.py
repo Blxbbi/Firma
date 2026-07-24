@@ -103,7 +103,7 @@ class PiMeshReceiverLoop:
         interval: float = 1.0,
         expected_run_id: Optional[str] = None,
         task_done_events: Optional[Dict[tuple, asyncio.Event]] = None,
-        task_assigned_at: Optional[Dict[str, Tuple[str, float]]] = None,
+        task_assigned_at: Optional[Dict[tuple, Tuple[str, float]]] = None,
     ):
         self.transport = transport
         self.crew_cwds = crew_cwds
@@ -114,7 +114,6 @@ class PiMeshReceiverLoop:
         self.task_assigned_at = task_assigned_at or {}
         self._consumed: set = set()
         self._guarded_tasks: set = set()
-        self._agent_end_seen: Dict[str, bool] = {}
         self.NO_PROGRESS_TIMEOUT_S = 120.0
         self.running = False
 
@@ -252,14 +251,14 @@ class PiMeshReceiverLoop:
             return None
         return os.path.join(crew_cwd, '.pi', 'work', self.expected_run_id, task_id, 'worker.log')
 
-    def _has_agent_end(self, crew_cwd: str, task_id: str) -> bool:
-        if task_id in self._agent_end_seen:
-            return self._agent_end_seen[task_id]
+    def _has_agent_end(self, crew_cwd: str, task_id: str, assigned_at: Optional[float] = None) -> bool:
         log_path = self._worker_log_path(crew_cwd, task_id)
         if not log_path or not os.path.isfile(log_path):
-            self._agent_end_seen[task_id] = False
             return False
         try:
+            mtime = os.path.getmtime(log_path)
+            if assigned_at is not None and mtime <= assigned_at:
+                return False
             with open(log_path, 'r', encoding='utf-8', errors='replace') as f:
                 for line in f:
                     line = line.strip()
@@ -270,18 +269,19 @@ class PiMeshReceiverLoop:
                     except json.JSONDecodeError:
                         continue
                     if obj.get('type') == 'agent_end':
-                        self._agent_end_seen[task_id] = True
                         return True
         except Exception:
             pass
-        self._agent_end_seen[task_id] = False
         return False
 
-    def _has_write_progress(self, crew_cwd: str, task_id: str) -> bool:
+    def _has_write_progress(self, crew_cwd: str, task_id: str, assigned_at: Optional[float] = None) -> bool:
         log_path = self._worker_log_path(crew_cwd, task_id)
         if not log_path or not os.path.isfile(log_path):
             return False
         try:
+            mtime = os.path.getmtime(log_path)
+            if assigned_at is not None and mtime <= assigned_at:
+                return False
             with open(log_path, 'r', encoding='utf-8', errors='replace') as f:
                 for line in f:
                     line = line.strip()
@@ -684,24 +684,25 @@ class PiMeshReceiverLoop:
 
         # --- Guards: fail-fast + no-progress ---
         now = time.time()
-        for task_id, (role, assigned_at) in list(self.task_assigned_at.items()):
+        for key, (role, assigned_at) in list(self.task_assigned_at.items()):
+            task_id = key[0] if isinstance(key, tuple) else key
             if task_id in self._guarded_tasks:
                 continue
             crew_cwd = self._crew_cwd(role)
             worker_dir = self._worker_dir(crew_cwd)
             resp_file = os.path.join(worker_dir, f"worker_response.{task_id}{WORKER_RESPONSE_SUFFIX}")
             if os.path.isfile(resp_file):
-                self.task_assigned_at.pop(task_id, None)
+                self.task_assigned_at.pop(key, None)
                 continue
 
             fail = None
-            if self._has_agent_end(crew_cwd, task_id):
+            if self._has_agent_end(crew_cwd, task_id, assigned_at):
                 fail = (
                     'TASK_FAILED',
                     'WORKER_EXITED_WITHOUT_SUBMISSION: agent_end detected in worker.log without worker_response.',
                     role,
                 )
-            elif now - assigned_at > self.NO_PROGRESS_TIMEOUT_S and not self._has_write_progress(crew_cwd, task_id):
+            elif now - assigned_at > self.NO_PROGRESS_TIMEOUT_S and not self._has_write_progress(crew_cwd, task_id, assigned_at):
                 fail = (
                     'WORKER_TIMEOUT',
                     f'NO_PROGRESS: no worker_response or write tool call within {self.NO_PROGRESS_TIMEOUT_S}s.',
@@ -777,12 +778,13 @@ def make_pimesh_messenger_callback(transport, provider, crew_cwds, project_root,
     spawn_sem = asyncio.Semaphore(MAX_CONCURRENT_SPAWNS)
     active_spawns = {}
     task_done_events: Dict[tuple, asyncio.Event] = {}
-    task_assigned_at: Dict[str, Tuple[str, float]] = {}
+    task_assigned_at: Dict[tuple, Tuple[str, float]] = {}
 
     async def _spawn_limited(role, payload, crew_cwd, model, session_id, session_dir, correction_note, spawn_key, task_assigned_at):
         task_id = payload.get('task_id')
-        if task_id:
-            task_assigned_at[task_id] = (role, time.time())
+        state_revision = payload.get('state_revision')
+        if task_id is not None:
+            task_assigned_at[(task_id, state_revision)] = (role, time.time())
         # Begrenzt die ANZAHL gleichzeitig laufender `pi`-Subprozesse. Slot wird bis
         # Outcome (Response published / Timeout / Proc-Exit) gehalten -> vermeidet
         # Free-Tier Rate-Limits / 320s-Timeouts durch 3+ gleichzeitige Calls.

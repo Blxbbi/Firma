@@ -38,7 +38,7 @@ def _write_worker_log(worker_dir, run_id, task_id, events):
             f.write(json.dumps(ev, ensure_ascii=False) + '\n')
 
 
-def _make_receiver(run_id='run-X', now=None):
+def _make_receiver(run_id='run-X', now=None, state_revision=1):
     transport = FakeTransport()
     crew_cwds = {"CODER": 'pimesh/coding-crew'}
     root = tempfile.mkdtemp()
@@ -47,7 +47,7 @@ def _make_receiver(run_id='run-X', now=None):
         crew_cwds=crew_cwds,
         project_root=root,
         expected_run_id=run_id,
-        task_assigned_at={'task-1': ('CODER', now if now is not None else time.time())},
+        task_assigned_at={('task-1', state_revision): ('CODER', now if now is not None else time.time())},
     )
     return transport, receiver, root
 
@@ -110,8 +110,48 @@ def test_no_progress_timeout_triggers_before_hard_timeout():
     print("PASS: no-progress timeout triggers before hard timeout")
 
 
+def test_stale_agent_end_ignored_before_assigned_at():
+    transport, receiver, root = _make_receiver()
+    crew_cwd = os.path.join(root, 'pimesh/coding-crew')
+    log_path = os.path.join(crew_cwd, '.pi', 'work', 'run-X', 'task-1', 'worker.log')
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    # Schreibe eine worker.log mit agent_end, aber mtime ist VOR assigned_at
+    with open(log_path, 'w', encoding='utf-8') as f:
+        f.write(json.dumps({'type': 'session'}) + '\n')
+        f.write(json.dumps({'type': 'agent_end', 'willRetry': False}) + '\n')
+    old_mtime = time.time() - 200
+    os.utime(log_path, (old_mtime, old_mtime))
+
+    out = receiver.scan_once()
+    events = [it['payload']['event'] for it in out]
+    assert 'TASK_FAILED' not in events, f"stale agent_end should not trigger guard, got {events}"
+    print("PASS: stale agent_end ignored when mtime <= assigned_at")
+
+
+def test_new_agent_end_triggers_guard_after_assigned_at():
+    # assigned_at AELTER als mtime, damit Guard feuert
+    assigned_at = time.time() - 20
+    transport, receiver, root = _make_receiver(state_revision=2, now=assigned_at)
+    crew_cwd = os.path.join(root, 'pimesh/coding-crew')
+    log_path = os.path.join(crew_cwd, '.pi', 'work', 'run-X', 'task-1', 'worker.log')
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    with open(log_path, 'w', encoding='utf-8') as f:
+        f.write(json.dumps({'type': 'session'}) + '\n')
+        f.write(json.dumps({'type': 'agent_end', 'willRetry': False}) + '\n')
+    # mtime ist NACH assigned_at
+    new_mtime = time.time() - 10
+    os.utime(log_path, (new_mtime, new_mtime))
+
+    out = receiver.scan_once()
+    events = [it['payload']['event'] for it in out]
+    assert 'TASK_FAILED' in events, f"new agent_end should trigger guard, got {events}"
+    print("PASS: new agent_end triggers guard when mtime > assigned_at")
+
+
 if __name__ == "__main__":
     test_fail_fast_on_agent_end_without_worker_response()
     test_no_guard_when_worker_response_exists()
     test_no_progress_timeout_triggers_before_hard_timeout()
+    test_stale_agent_end_ignored_before_assigned_at()
+    test_new_agent_end_triggers_guard_after_assigned_at()
     print("\nALL RECEIVER GUARD TESTS PASSED")

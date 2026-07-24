@@ -79,8 +79,8 @@ def test_task_assigned_at_tracked():
     _, _, wrapper, task_assigned_at = _make()
     assert len(task_assigned_at) == 0
     asyncio.run(wrapper(_payload("task-1", 5)))
-    assert "task-1" in task_assigned_at
-    role, ts = task_assigned_at["task-1"]
+    assert ("task-1", 5) in task_assigned_at
+    role, ts = task_assigned_at[("task-1", 5)]
     assert role == "CODER"
     assert ts <= time.time()
     print("PASS: task_assigned_at tracked")
