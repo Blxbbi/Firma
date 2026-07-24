@@ -18,9 +18,10 @@ import asyncio
 import json
 import logging
 import os
+import time
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from engine.settings import (
     BASE_DIR, DB_DIR, ARTIFACT_DIR, FIRMA_TRANSPORT, PIMESH_CREWS, PIMESH_MODELS, REVIEWER_IS_DUMMY,
@@ -102,6 +103,7 @@ class PiMeshReceiverLoop:
         interval: float = 1.0,
         expected_run_id: Optional[str] = None,
         task_done_events: Optional[Dict[tuple, asyncio.Event]] = None,
+        task_assigned_at: Optional[Dict[str, Tuple[str, float]]] = None,
     ):
         self.transport = transport
         self.crew_cwds = crew_cwds
@@ -109,7 +111,11 @@ class PiMeshReceiverLoop:
         self.interval = interval
         self.expected_run_id = expected_run_id
         self.task_done_events = task_done_events or {}
+        self.task_assigned_at = task_assigned_at or {}
         self._consumed: set = set()
+        self._guarded_tasks: set = set()
+        self._agent_end_seen: Dict[str, bool] = {}
+        self.NO_PROGRESS_TIMEOUT_S = 120.0
         self.running = False
 
     # ------------------------------------------------------------------ helpers
@@ -240,6 +246,88 @@ class PiMeshReceiverLoop:
                 return True
         return False
 
+    # ------------------------------------------------------------------ guards
+    def _worker_log_path(self, crew_cwd: str, task_id: str) -> Optional[str]:
+        if not self.expected_run_id:
+            return None
+        return os.path.join(crew_cwd, '.pi', 'work', self.expected_run_id, task_id, 'worker.log')
+
+    def _has_agent_end(self, crew_cwd: str, task_id: str) -> bool:
+        if task_id in self._agent_end_seen:
+            return self._agent_end_seen[task_id]
+        log_path = self._worker_log_path(crew_cwd, task_id)
+        if not log_path or not os.path.isfile(log_path):
+            self._agent_end_seen[task_id] = False
+            return False
+        try:
+            with open(log_path, 'r', encoding='utf-8', errors='replace') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if obj.get('type') == 'agent_end':
+                        self._agent_end_seen[task_id] = True
+                        return True
+        except Exception:
+            pass
+        self._agent_end_seen[task_id] = False
+        return False
+
+    def _has_write_progress(self, crew_cwd: str, task_id: str) -> bool:
+        log_path = self._worker_log_path(crew_cwd, task_id)
+        if not log_path or not os.path.isfile(log_path):
+            return False
+        try:
+            with open(log_path, 'r', encoding='utf-8', errors='replace') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    t = obj.get('type')
+                    if t in ('message_start', 'message_end', 'message_update'):
+                        msg = obj.get('message', {})
+                        for c in (msg.get('content') or []):
+                            if c.get('type') == 'toolCall' and c.get('name') == 'write':
+                                return True
+                    if t in ('tool_execution_start', 'tool_execution_end'):
+                        if obj.get('tool_name') == 'write' or obj.get('name') == 'write':
+                            return True
+        except Exception:
+            pass
+        return False
+
+    def _publish_system_failure(self, task_id: str, event: str, reason: str, role: str = 'SYSTEM') -> Optional[Dict[str, Any]]:
+        key = (self.expected_run_id, task_id, None)
+        if key in self._consumed or task_id in self._guarded_tasks:
+            return None
+        self._guarded_tasks.add(task_id)
+        payload = {
+            'protocol_version': '1.0',
+            'message_id': f"{event.lower()}-{task_id}-{uuid.uuid4().hex}",
+            'task_id': task_id,
+            'run_id': self.expected_run_id,
+            'state_revision': None,
+            'event': event,
+            'sender_role': role,
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'logs': reason,
+            'artifacts': None,
+            'plan_draft': None,
+        }
+        self._consumed.add(key)
+        return {
+            'role': role,
+            'payload': payload,
+            'correlation_id': task_id,
+        }
 
     def _schema_fail(self, raw: Dict[str, Any], error: str) -> Dict[str, Any]:
         """Kanonischer Struktur-Bruch -> SUBMISSION_INVALID_SCHEMA (kein Repair)."""
@@ -593,6 +681,38 @@ class PiMeshReceiverLoop:
                     "correlation_id": task_id,
                 })
                 logger.info(f"[Receiver] Prepared WorkerResponse for {task_id} (event={validated.get('event')})")
+
+        # --- Guards: fail-fast + no-progress ---
+        now = time.time()
+        for task_id, (role, assigned_at) in list(self.task_assigned_at.items()):
+            if task_id in self._guarded_tasks:
+                continue
+            crew_cwd = self._crew_cwd(role)
+            worker_dir = self._worker_dir(crew_cwd)
+            resp_file = os.path.join(worker_dir, f"worker_response.{task_id}{WORKER_RESPONSE_SUFFIX}")
+            if os.path.isfile(resp_file):
+                self.task_assigned_at.pop(task_id, None)
+                continue
+
+            fail = None
+            if self._has_agent_end(crew_cwd, task_id):
+                fail = (
+                    'TASK_FAILED',
+                    'WORKER_EXITED_WITHOUT_SUBMISSION: agent_end detected in worker.log without worker_response.',
+                    role,
+                )
+            elif now - assigned_at > self.NO_PROGRESS_TIMEOUT_S and not self._has_write_progress(crew_cwd, task_id):
+                fail = (
+                    'WORKER_TIMEOUT',
+                    f'NO_PROGRESS: no worker_response or write tool call within {self.NO_PROGRESS_TIMEOUT_S}s.',
+                    role,
+                )
+            if fail:
+                event, reason, sender_role = fail
+                synthetic = self._publish_system_failure(task_id, event, reason, role=sender_role)
+                if synthetic:
+                    out.append(synthetic)
+                    logger.warning(f"[Receiver] Guard {event} for {task_id} ({sender_role}): {reason}")
         return out
 
     def _signal_task_done(self, payload: Dict[str, Any]) -> None:
@@ -657,8 +777,12 @@ def make_pimesh_messenger_callback(transport, provider, crew_cwds, project_root,
     spawn_sem = asyncio.Semaphore(MAX_CONCURRENT_SPAWNS)
     active_spawns = {}
     task_done_events: Dict[tuple, asyncio.Event] = {}
+    task_assigned_at: Dict[str, Tuple[str, float]] = {}
 
-    async def _spawn_limited(role, payload, crew_cwd, model, session_id, session_dir, correction_note, spawn_key):
+    async def _spawn_limited(role, payload, crew_cwd, model, session_id, session_dir, correction_note, spawn_key, task_assigned_at):
+        task_id = payload.get('task_id')
+        if task_id:
+            task_assigned_at[task_id] = (role, time.time())
         # Begrenzt die ANZAHL gleichzeitig laufender `pi`-Subprozesse. Slot wird bis
         # Outcome (Response published / Timeout / Proc-Exit) gehalten -> vermeidet
         # Free-Tier Rate-Limits / 320s-Timeouts durch 3+ gleichzeitige Calls.
@@ -858,10 +982,10 @@ def make_pimesh_messenger_callback(transport, provider, crew_cwds, project_root,
                     session_dir = str(SessionRegistry.session_dir_for(payload['run_id']))
         spawn_key = (payload.get('task_id'), payload.get('state_revision'), role)
         asyncio.create_task(
-            _spawn_limited(role, payload, crew_cwd, model, session_id, session_dir, correction_note, spawn_key)
+            _spawn_limited(role, payload, crew_cwd, model, session_id, session_dir, correction_note, spawn_key, task_assigned_at)
         )
 
-    return wrapper, spawned, task_done_events
+    return wrapper, spawned, task_done_events, task_assigned_at
 
 
 # ---------------------------------------------------------------------------
@@ -926,7 +1050,7 @@ async def main_logic():
     # -> dispatch + PiProvider-Spawn). Ohne messenger_callback wuerde nur dispatchen,
     # aber KEINE pi-Worker starten -> PLANNER-TIMEOUT.
     provider = PiProvider()
-    pimesh_callback, _spawned, task_done_events = make_pimesh_messenger_callback(
+    pimesh_callback, _spawned, task_done_events, task_assigned_at = make_pimesh_messenger_callback(
         transport=shared_transport,
         provider=provider,
         crew_cwds=PIMESH_CREWS,
@@ -940,6 +1064,7 @@ async def main_logic():
         project_root=str(BASE_DIR),
         expected_run_id=run_id,
         task_done_events=task_done_events,
+        task_assigned_at=task_assigned_at,
     )
     if DEBUG_RECEIVER_RECOVERY:
         for role, cwd in PIMESH_CREWS.items():

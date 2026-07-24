@@ -9,6 +9,7 @@ import asyncio
 import os
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -49,15 +50,15 @@ def _make():
     root = tempfile.mkdtemp()
     transport = FakeTransport()
     provider = FakeProvider()
-    wrapper, spawned, _task_done_events = make_pimesh_messenger_callback(
+    wrapper, spawned, _task_done_events, task_assigned_at = make_pimesh_messenger_callback(
         transport=transport, provider=provider, crew_cwds=CREWS,
         project_root=root, models={"CODER": "kilo/kilo-auto/free"},
     )
-    return transport, provider, wrapper
+    return transport, provider, wrapper, task_assigned_at
 
 
 def test_spawn_called_once_per_assignment_revision():
-    transport, provider, wrapper = _make()
+    transport, provider, wrapper, _task_assigned_at = _make()
     p = _payload("task-1", 5)
     asyncio.run(wrapper(p))
     asyncio.run(wrapper(p))  # identischer Emit -> ganze Callback uebersprungen (dispatch + spawn)
@@ -67,14 +68,26 @@ def test_spawn_called_once_per_assignment_revision():
 
 
 def test_spawn_called_again_on_new_revision():
-    transport, provider, wrapper = _make()
+    transport, provider, wrapper, _task_assigned_at = _make()
     asyncio.run(wrapper(_payload("task-1", 5)))
     asyncio.run(wrapper(_payload("task-1", 6)))  # neue revision -> legitimer Respawn
     assert len(provider.spawns) == 2, f"neue revision respawnt, got {len(provider.spawns)}"
     print("PASS: spawn called again on new revision")
 
 
+def test_task_assigned_at_tracked():
+    _, _, wrapper, task_assigned_at = _make()
+    assert len(task_assigned_at) == 0
+    asyncio.run(wrapper(_payload("task-1", 5)))
+    assert "task-1" in task_assigned_at
+    role, ts = task_assigned_at["task-1"]
+    assert role == "CODER"
+    assert ts <= time.time()
+    print("PASS: task_assigned_at tracked")
+
+
 if __name__ == "__main__":
     test_spawn_called_once_per_assignment_revision()
     test_spawn_called_again_on_new_revision()
+    test_task_assigned_at_tracked()
     print("\nALL SPAWN TESTS PASSED")
