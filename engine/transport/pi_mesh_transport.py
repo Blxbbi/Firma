@@ -280,10 +280,24 @@ class PiMeshTransport(WorkerTransport):
                 "- Keine Rekursion, kein Plan, kein Code.\n\n"
             )
         else:  # CODER
-            parts.append("## Global Goal (BACKGROUND ONLY)\n")
+            parts.append("## SCOPE CONTRACT (HARD)\n")
+            scope_files = td.get("scope_files") or []
+            protected_files = td.get("protected_files") or []
+            if scope_files:
+                parts.append("You are ALLOWED to modify ONLY these files:\n")
+                for sf in scope_files:
+                    parts.append(f"- `{sf}`\n")
+                parts.append("\n")
+            if protected_files:
+                parts.append("You MUST NOT touch these files (read-only or ignore them):\n")
+                for pf in protected_files:
+                    parts.append(f"- `{pf}`\n")
+                parts.append(
+                    "If you need to change any protected file, STOP and submit `TASK_FAILED` with reason `OUT_OF_SCOPE`.\n\n"
+                )
             parts.append(
-                "Der `prompt` im Assignment beschreibt das GESAMT-Projekt. Interpretiere ihn NICHT "
-                "als deine Aufgabenliste — er dient NUR als Hintergrundkontext.\n\n"
+                "The kernel verifier will FAIL your submission if any file outside the allowed scope was changed. "
+                "There is no hidden acceptance criteria — only the files listed above matter.\n\n"
             )
             desc = td.get("description") or "(siehe task_definition)"
             parts.append("## Your Task (AUTHORITATIVE)\n")

@@ -178,3 +178,34 @@ class TestGuardianPlanRejection:
             assert len(task_updates) == 0
         finally:
             GuardianPipeline.MAX_ITERATIONS = original_max
+
+    def test_verify_scope_failure_sets_last_review_feedback(self):
+        """S3: VERIFY_FAILURE with SCOPE_VERIFY_* sets last_review_feedback for CODER retry."""
+        from engine.models import TaskEvent
+        payload = {
+            "protocol_version": "1.0",
+            "message_id": str(uuid.uuid4()),
+            "task_id": "task-1",
+            "run_id": "run-1",
+            "state_revision": 1,
+            "event": TaskEvent.VERIFY_FAILURE.value,
+            "sender_role": AssignedRole.SYSTEM.value,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "logs": "SCOPE_VERIFY_PROTECTED_VIOLATION: protected files changed/deleted: ['index.html', 'style.css']",
+            "artifacts": [],
+            "plan_draft": None,
+        }
+        # Ensure the task exists in the fake DB
+        self.task.execution_phase = ExecutionPhase.VERIFYING.value
+        self.task.attempt_count = 0
+        self.task.last_review_feedback = None
+
+        success, message = self._run(payload)
+        assert success is True
+        # S3: last_review_feedback must be set so CODER retry gets actionable feedback
+        task_updates = self._task_update_calls()
+        assert len(task_updates) == 1, f"expected 1 task update, got {len(task_updates)}"
+        update_str = str(task_updates[0])
+        assert "last_review_feedback" in update_str
+        assert "SCOPE_VERIFY_PROTECTED_VIOLATION" in payload["logs"]
+        assert self.task.attempt_count == 1

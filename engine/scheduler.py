@@ -137,6 +137,17 @@ class Scheduler:
                             "previous_feedback": prev_fb
                         }
                     }
+                    # Ingest mode: inject scope/protected files so the CODER spec can
+                    # render an explicit SCOPE CONTRACT section (S1 fix).
+                    if task.assigned_role == "CODER":
+                        try:
+                            from engine.services.ingest_context import get_task_scope
+                            scope = get_task_scope(run_id, task.id)
+                            if scope:
+                                assignment_payload["task_definition"]["scope_files"] = scope.get("scope_files") or []
+                                assignment_payload["task_definition"]["protected_files"] = scope.get("protected_files") or []
+                        except Exception as exc:
+                            logger.warning("[Scheduler] Failed to load task scope for %s: %s", task.id, exc)
                     # Phase 3 (Idee B): ground the PLANNER on the Researcher's read-only
                     # briefing. Handoff strictly via workspace file (no P2P). CODER tasks
                     # created by the plan inherit the same briefing pointer below.

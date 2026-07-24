@@ -164,7 +164,12 @@ class PiMeshReceiverLoop:
                             art["content"] = content
                             # Phase 2 (Idee A) Step3.3: workspace tree is the source of
                             # truth for the scope verifier -> materialize the CODER edit there.
-                            _materialize_to_workspace(worker_payload.get("run_id"), art.get("path"), content)
+                            _materialize_to_workspace(
+                                worker_payload.get("run_id"),
+                                art.get("path"),
+                                content,
+                                worker_payload.get("task_id"),
+                            )
                         except Exception as e:
                             logger.warning(f"[Receiver] Cannot read {fp}: {e}")
                             art["content"] = None

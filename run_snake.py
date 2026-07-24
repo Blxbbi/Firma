@@ -180,7 +180,7 @@ async def main_logic():
         controller.transport_factory = lambda: shared_transport
         # Single authority: Scheduler CLAIM (READY->CLAIMED) -> dispatch + PiProvider-Spawn
         pi_provider = PiProvider()
-        pimesh_callback, _spawned, _task_done_events = make_pimesh_messenger_callback(
+        pimesh_callback, _spawned, _task_done_events, _task_assigned_at = make_pimesh_messenger_callback(
             transport=shared_transport,
             provider=pi_provider,
             crew_cwds=PIMESH_CREWS,

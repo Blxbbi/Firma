@@ -17,8 +17,14 @@ import os
 from engine.services.ingest_context import get_ingest
 
 
-def materialize_to_workspace(run_id, rel_path, content):
-    """Copy one artifact into the run's workspace project tree (truth)."""
+def materialize_to_workspace(run_id, rel_path, content, task_id=None):
+    """Copy one artifact into the run's workspace project tree (truth).
+
+    In ingest mode, only files listed in the task's scope_files are allowed to
+    materialize. Out-of-scope artifacts (e.g. protected files written by a
+    non-compliant CODER) are skipped with a warning so the scope verifier sees
+    the original baseline state for those files.
+    """
     if not run_id or content is None:
         return
     try:
@@ -28,6 +34,25 @@ def materialize_to_workspace(run_id, rel_path, content):
         rel = (rel_path or "").replace("\\", "/")
         if rel.startswith("/") or rel.startswith("\\") or ".." in rel:
             return
+
+        # S4 scope gate: in ingest mode, only materialize files that are explicitly
+        # in scope for the task that produced this artifact.
+        if task_id:
+            try:
+                from engine.services.ingest_context import get_task_scope
+                scope_for_task = get_task_scope(run_id, task_id)
+                if scope_for_task:
+                    allowed = set(scope_for_task.get("scope_files") or [])
+                    if rel not in allowed:
+                        logger.warning(
+                            "[WorkspaceMaterializer] Skipping out-of-scope artifact %s for task %s (run %s) "
+                            "(allowed=%s)",
+                            rel, task_id, run_id, sorted(allowed),
+                        )
+                        return
+            except Exception:
+                pass
+
         root_abs = os.path.abspath(ing["workspace_root"])  # .../project
         # Phase 3 (Idee B): Researcher output lives in the SIBLING research/ dir
         # (.../research), NOT inside the project tree -- otherwise the read-only

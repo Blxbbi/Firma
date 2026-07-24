@@ -460,6 +460,15 @@ class GuardianPipeline:
                 )
                 logger.info(f"[Collaborative] Feedback captured for {task.id}: {(response.logs or '')[:120]!r}")
 
+            # S3: scope/protected verifier failures are actionable for CODER retries
+            if response.event == TaskEvent.VERIFY_FAILURE and (response.logs or "").startswith("SCOPE_VERIFY_"):
+                await session.execute(
+                    sql_update(Task).where(Task.id == task.id).values(
+                        last_review_feedback=(response.logs or "Scope violation")[:1000]
+                    )
+                )
+                logger.info(f"[Scope] Feedback captured for {task.id}: {(response.logs or '')[:140]!r}")
+
             if transition_res.next_phase == ExecutionPhase.CODING:
                 if response.event == TaskEvent.VERIFY_FAILURE:
                     task.attempt_count += 1

@@ -219,9 +219,9 @@ def test_spec_prompt_fixes_1_to_4():
     md = open(os.path.join(root, CREWS["CODER"], ".pi", "messenger", "crew", "tasks", "task-3.md"), encoding="utf-8").read()
     # Fix 1: kein JSON-Return mehr (auch nicht im uebergebenen prompt)
     assert "Return ONLY" not in md, "Fix 1 failed: still contains 'Return ONLY'"
-    # Fix 2: Scope-Trennung Global Goal vs Authoritative Task
-    assert "BACKGROUND ONLY" in md, "Fix 2 failed: no 'BACKGROUND ONLY' scope marker"
-    assert "AUTHORITATIVE" in md, "Fix 2 failed: no 'AUTHORITATIVE' task marker"
+    # Fix 2: Scope-Trennung: explizite Scope/Protected-Regeln statt generischem Background
+    assert "SCOPE CONTRACT" in md, "Fix 2 failed: no SCOPE CONTRACT section"
+    assert "AUTHORITATIVE" in md, "Fix 2 failed: no AUTHORITATIVE task marker"
     # Fix 3: acceptance criteria als MUST PASS kommuniziert
     assert "MUST PASS" in md, "Fix 3 failed: no 'MUST PASS' criteria block"
     assert "CONTAINS:app.js:innerHTML" in md, "Fix 3 failed: criteria not rendered"
