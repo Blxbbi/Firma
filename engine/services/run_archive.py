@@ -134,13 +134,42 @@ class RunArchiver:
 
         return usage
 
+    def _role_for_task(self, crew_rel: str, task_id: str) -> str:
+        """Deterministic role resolution for a worker log.
+
+        - pimesh/coding-crew -> CODER
+        - pimesh/reviewing-crew -> REVIEWER
+        - pimesh/planning-crew -> load tasks/<task_id>.json and read firma_assignment.role
+        - fallback -> UNKNOWN
+        """
+        crew_name = Path(crew_rel).name
+        if crew_name == "coding-crew":
+            return "CODER"
+        if crew_name == "reviewing-crew":
+            return "REVIEWER"
+        if crew_name == "planning-crew":
+            task_json = Path(BASE_DIR) / crew_rel / ".pi" / "messenger" / "crew" / "tasks" / f"{task_id}.json"
+            if task_json.is_file():
+                try:
+                    data = json.loads(task_json.read_text(encoding="utf-8", errors="replace"))
+                    role = ((data.get("firma_assignment") or {}).get("role") or data.get("role"))
+                    if isinstance(role, str) and role:
+                        return role.upper()
+                except Exception:
+                    pass
+            return "PLANNING_CREW_UNKNOWN"
+        return "UNKNOWN"
+
     def _collect_tool_usage_by_task(
         self, run_id: str
     ) -> Dict[str, Dict[str, int]]:
-        """Parse worker.log files and aggregate tool calls by task_id.
+        """Parse worker.log files and aggregate tool calls by (role, task_id).
 
-        Returns: {task_id: {tool_name: count, ...}, ...}
+        Returns: {"ROLE:task_id": {tool_name: count, ...},
+                 ...}
         """
+        from engine.services.worker_log_parser import parse_worker_log
+
         by_task: Dict[str, Dict[str, int]] = {}
         base = Path(BASE_DIR)
         seen_task_dirs: set = set()
@@ -161,42 +190,30 @@ class RunArchiver:
                 if task_dir_key in seen_task_dirs:
                     continue
                 seen_task_dirs.add(task_dir_key)
+                actor_role = self._role_for_task(crew_rel, task_id)
+                key = f"{actor_role}:{task_id}"
                 try:
-                    with log_path.open("r", encoding="utf-8", errors="replace") as f:
-                        for line in f:
-                            line = line.strip()
-                            if not line:
-                                continue
-                            try:
-                                obj = json.loads(line)
-                            except json.JSONDecodeError:
-                                continue
-                            if (
-                                isinstance(obj, dict)
-                                and obj.get("type") == "tool_execution_start"
-                            ):
-                                tool_name = obj.get("toolName") or obj.get("name")
-                                if isinstance(tool_name, str):
-                                    tool_name = tool_name.strip().lower()
-                                    if not tool_name:
-                                        continue
-                                    task_usage = by_task.setdefault(task_id, {})
-                                    task_usage[tool_name] = task_usage.get(tool_name, 0) + 1
+                    metrics = parse_worker_log(log_path)
+                    task_usage = by_task.setdefault(key, {})
+                    for tool_name, count in (metrics.tool_calls or {}).items():
+                        task_usage[tool_name] = task_usage.get(tool_name, 0) + count
                 except Exception:
                     continue
 
         return by_task
 
     def _collect_turn_usage_by_task(self, run_id: str) -> Dict[str, Dict[str, Any]]:
-        """Parse worker.log files and aggregate turn/tool metrics by task_id.
+        """Parse worker.log files and aggregate turn/tool/metrics by (role, task_id).
 
-        Centralized parsing via ``engine.services.worker_log_parser.parse_worker_log``.
-        Returns: {task_id: {turn_count, tool_calls, token_usage, warnings}, ...}
+        A task may have worker logs in multiple crew dirs (e.g. coder + reviewer).
+        We keep them separate by using a role-qualified key so metrics are not
+        summed across different roles for the same task_id.
         """
         from engine.services.worker_log_parser import parse_worker_log
 
         by_task: Dict[str, Dict[str, Any]] = {}
         base = Path(BASE_DIR)
+        seen_task_dirs: set = set()
 
         for role, crew_rel in PIMESH_CREWS.items():
             crew_dir = base / crew_rel / ".pi" / "work" / run_id
@@ -209,8 +226,19 @@ class RunArchiver:
                 log_path = task_dir / "worker.log"
                 if not log_path.is_file():
                     continue
+                # Avoid double-counting when multiple roles share the same crew dir
+                task_dir_key = str(task_dir)
+                if task_dir_key in seen_task_dirs:
+                    continue
+                seen_task_dirs.add(task_dir_key)
+                actor_role = self._role_for_task(crew_rel, task_id)
+                key = f"{actor_role}:{task_id}"
                 metrics = parse_worker_log(log_path)
-                by_task[task_id] = metrics.to_dict()
+                data = metrics.to_dict()
+                data.setdefault("observed_roles", [])
+                if actor_role not in data["observed_roles"]:
+                    data["observed_roles"].append(actor_role)
+                by_task[key] = data
         return by_task
 
     def _build_config_snapshot(self, config: Dict[str, Any]) -> Dict[str, Any]:

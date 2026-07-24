@@ -135,6 +135,10 @@ class RunAuditor:
         tool_usage = self._tool_usage_section(manifest, tasks)
         policy_checks = self._tool_policy_checks(manifest, tasks)
         turn_usage = self._turn_usage_section(manifest, tasks)
+        retry_error_details = self._retry_error_details_section(manifest, tasks)
+        phase_timing = self._phase_timing_section(manifest, tasks)
+        token_usage_section = self._token_usage_section(manifest, tasks)
+        error_patterns = self._error_patterns_section(manifest, tasks)
 
         # run-level failure reason (governance/guard messages live here)
         run_failure = (
@@ -158,10 +162,15 @@ class RunAuditor:
             "tool_usage": tool_usage,
             "tool_policy_checks": policy_checks,
             "turn_usage": turn_usage,
+            "retry_error_details": retry_error_details,
+            "phase_timing": phase_timing,
+            "token_usage_report": token_usage_section,
+            "error_patterns": error_patterns,
             "sections_present": [
                 "overview", "task_table", "scope_summary", "research",
                 "failures", "artifacts", "repro_env",
                 "tool_usage", "tool_policy_checks", "turn_usage",
+                "retry_error_details", "phase_timing", "token_usage_report", "error_patterns",
             ],
             "warnings": warnings,
         }
@@ -206,9 +215,9 @@ class RunAuditor:
     def _turn_usage_section(self, manifest, tasks) -> Dict[str, Any]:
         turn_by_task = manifest.get("turn_usage_by_task") or {}
         by_role: Dict[str, Dict[str, Any]] = {}
-        for t in tasks:
-            task_turn = turn_by_task.get(t.id, {})
-            role = t.assigned_role or "UNKNOWN"
+        task_map = {t.id: t for t in tasks}
+        for key, task_turn in turn_by_task.items():
+            role, task_id = self._parse_actor_key(key)
             role_agg = by_role.setdefault(role, {
                 "tasks": 0,
                 "turns": 0,
@@ -218,10 +227,177 @@ class RunAuditor:
             role_agg["tasks"] += 1
             role_agg["turns"] += task_turn.get("turn_count", 0) or 0
             role_agg["tool_calls"] += sum(task_turn.get("tool_calls", {}).values())
-            role_agg["warnings"].extend(task_turn.get("warnings") or [])
+            for w in (task_turn.get("warnings") or []):
+                if w not in role_agg["warnings"]:
+                    role_agg["warnings"].append(w)
+        # Fallback for legacy manifests without role-qualified keys
+        if not by_role and turn_by_task:
+            for key, task_turn in turn_by_task.items():
+                role, _ = self._parse_actor_key(key)
+                role_agg = by_role.setdefault(role, {
+                    "tasks": 0,
+                    "turns": 0,
+                    "tool_calls": 0,
+                    "warnings": [],
+                })
+                role_agg["tasks"] += 1
+                role_agg["turns"] += task_turn.get("turn_count", 0) or 0
+                role_agg["tool_calls"] += sum(task_turn.get("tool_calls", {}).values())
+                for w in (task_turn.get("warnings") or []):
+                    if w not in role_agg["warnings"]:
+                        role_agg["warnings"].append(w)
         return {
             "by_task": turn_by_task,
             "by_role": by_role,
+        }
+
+    def _retry_error_details_section(self, manifest, tasks) -> Dict[str, Any]:
+        turn_by_task = manifest.get("turn_usage_by_task") or {}
+        details: List[Dict[str, Any]] = []
+        task_map = {t.id: t for t in tasks}
+        for key, task_turn in turn_by_task.items():
+            actor_role, task_id = self._parse_actor_key(key)
+            t = task_map.get(task_id)
+            error_events = task_turn.get("error_events") or []
+            role = (t.assigned_role if t else actor_role) or "UNKNOWN"
+            entry = {
+                "task_id": task_id,
+                "role": role,
+                "state": (t.state if t else None),
+                "execution_phase": (t.execution_phase if t else None),
+                "attempt_count": (t.attempt_count if t else 0),
+                "retry_count": (t.retry_count if t else 0),
+                "last_review_feedback": (t.last_review_feedback if t else None),
+                "error_events": error_events,
+                "phase_timing": task_turn.get("phase_timing"),
+            }
+            details.append(entry)
+        return {"by_task": details}
+
+    def _phase_timing_section(self, manifest, tasks) -> Dict[str, Any]:
+        turn_by_task = manifest.get("turn_usage_by_task") or {}
+        by_role: Dict[str, Dict[str, Any]] = {}
+        for t in tasks:
+            task_turn = turn_by_task.get(t.id, {})
+            timing = task_turn.get("phase_timing")
+            if not timing:
+                continue
+            role = t.assigned_role or "UNKNOWN"
+            role_agg = by_role.setdefault(role, {
+                "tasks": 0,
+                "total_duration_s": 0.0,
+                "max_duration_s": 0.0,
+                "min_duration_s": None,
+                "tasks_with_timing": 0,
+            })
+            role_agg["tasks"] += 1
+            dur = timing.get("duration_s") or 0.0
+            role_agg["total_duration_s"] += dur
+            role_agg["max_duration_s"] = max(role_agg["max_duration_s"], dur)
+            if role_agg["min_duration_s"] is None or dur < role_agg["min_duration_s"]:
+                role_agg["min_duration_s"] = dur
+            role_agg["tasks_with_timing"] += 1
+        return {
+            "by_task": {
+                t.id: (manifest.get("turn_usage_by_task") or {}).get(t.id, {}).get("phase_timing")
+                for t in tasks
+            },
+            "by_role": by_role,
+        }
+
+    def _phase_timing_section(self, manifest, tasks) -> Dict[str, Any]:
+        turn_by_task = manifest.get("turn_usage_by_task") or {}
+        by_role: Dict[str, Dict[str, Any]] = {}
+        task_map = {t.id: t for t in tasks}
+        for key, task_turn in turn_by_task.items():
+            timing = task_turn.get("phase_timing")
+            if not timing:
+                continue
+            actor_role, task_id = self._parse_actor_key(key)
+            t = task_map.get(task_id)
+            role = (t.assigned_role if t else actor_role) or "UNKNOWN"
+            role_agg = by_role.setdefault(role, {
+                "tasks": 0,
+                "total_duration_s": 0.0,
+                "max_duration_s": 0.0,
+                "min_duration_s": None,
+                "tasks_with_timing": 0,
+            })
+            role_agg["tasks"] += 1
+            dur = timing.get("duration_s") or 0.0
+            role_agg["total_duration_s"] += dur
+            role_agg["max_duration_s"] = max(role_agg["max_duration_s"], dur)
+            if role_agg["min_duration_s"] is None or dur < role_agg["min_duration_s"]:
+                role_agg["min_duration_s"] = dur
+            role_agg["tasks_with_timing"] += 1
+        return {
+            "by_task": {
+                key: task_turn.get("phase_timing")
+                for key, task_turn in turn_by_task.items()
+            },
+            "by_role": by_role,
+        }
+
+    def _token_usage_section(self, manifest, tasks) -> Dict[str, Any]:
+        turn_by_task = manifest.get("turn_usage_by_task") or {}
+        by_role: Dict[str, Dict[str, Any]] = {}
+        unavailable_tasks: List[str] = []
+        task_map = {t.id: t for t in tasks}
+        for key, task_turn in turn_by_task.items():
+            usage = task_turn.get("token_usage")
+            actor_role, task_id = self._parse_actor_key(key)
+            if not usage:
+                unavailable_tasks.append(task_id)
+                continue
+            t = task_map.get(task_id)
+            role = (t.assigned_role if t else actor_role) or "UNKNOWN"
+            role_agg = by_role.setdefault(role, {
+                "tasks": 0,
+                "total_tokens": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cache_read": 0,
+            })
+            role_agg["tasks"] += 1
+            role_agg["total_tokens"] += usage.get("total_tokens", 0) or 0
+            role_agg["input_tokens"] += usage.get("input_tokens", 0) or 0
+            role_agg["output_tokens"] += usage.get("output_tokens", 0) or 0
+            role_agg["cache_read"] += usage.get("cache_read", 0) or 0
+        return {
+            "by_task": {
+                key: task_turn.get("token_usage")
+                for key, task_turn in turn_by_task.items()
+            },
+            "by_role": by_role,
+            "unavailable_tasks": unavailable_tasks,
+            "note": "Token usage is best-effort. If unavailable, the provider did not report usage in worker.log.",
+        }
+
+    def _error_patterns_section(self, manifest, tasks) -> Dict[str, Any]:
+        turn_by_task = manifest.get("turn_usage_by_task") or {}
+        all_errors: List[Dict[str, Any]] = []
+        task_map = {t.id: t for t in tasks}
+        for key, task_turn in turn_by_task.items():
+            actor_role, task_id = self._parse_actor_key(key)
+            t = task_map.get(task_id)
+            role = (t.assigned_role if t else actor_role) or "UNKNOWN"
+            for ev in task_turn.get("error_events") or []:
+                all_errors.append({
+                    "task_id": task_id,
+                    "role": role,
+                    "type": ev.get("type"),
+                    "timestamp": ev.get("timestamp"),
+                    "message": ev.get("message"),
+                })
+        # Summarize patterns
+        pattern_counts: Dict[str, int] = {}
+        for ev in all_errors:
+            key = ev.get("type") or "unknown"
+            pattern_counts[key] = pattern_counts.get(key, 0) + 1
+        return {
+            "total_errors": len(all_errors),
+            "errors_by_type": pattern_counts,
+            "errors": all_errors[:50],
         }
 
     def _scope_summary(self, manifest, run_dir) -> List[Dict[str, Any]]:
@@ -303,6 +479,17 @@ class RunAuditor:
         if last_ev == "TASK_FAILED":
             return "governance_guard"
         return "unknown (see transition log)"
+
+    @staticmethod
+    def _parse_actor_key(key: str):
+        """Parse role-qualified worker log keys.
+
+        Expected format: "ROLE:task_id". Falls back to ("UNKNOWN", key) on missing separator.
+        """
+        if ":" in key:
+            role, task_id = key.split(":", 1)
+            return role, task_id
+        return "UNKNOWN", key
 
     @staticmethod
     def _duration_seconds(started_at, completed_at) -> Optional[float]:
@@ -457,12 +644,104 @@ class RunAuditor:
                 L.append(f"- tasks: {agg.get('tasks', 0)}")
                 L.append(f"- turns: {agg.get('turns', 0)}")
                 L.append(f"- tool_calls: {agg.get('tool_calls', 0)}")
-                warns = agg.get("warnings") or []
-                for w in warns:
-                    L.append(f"- warning: {w}")
+                warns = [w for w in (agg.get('warnings') or []) if 'phase_timing' not in w and 'token_usage_aggregated' not in w]
+                if warns:
+                    for w in warns:
+                        L.append(f"- warning: {w}")
+                else:
+                    L.append(f"- warnings: none")
                 L.append("")
         else:
             L.append("- no turn usage data (worker logs not available)")
+            L.append("")
+
+        L.append("## 11. Phase Timing (from worker.log)")
+        timing = r.get("phase_timing", {})
+        timing_by_role = timing.get("by_role", {})
+        if timing_by_role:
+            for role, agg in timing_by_role.items():
+                L.append(f"### {role}")
+                L.append(f"- tasks: {agg.get('tasks', 0)}")
+                L.append(f"- tasks_with_timing: {agg.get('tasks_with_timing', 0)}")
+                L.append(f"- total_duration_s: {agg.get('total_duration_s', 0)}")
+                L.append(f"- max_duration_s: {agg.get('max_duration_s', 0)}")
+                min_d = agg.get("min_duration_s")
+                L.append(f"- min_duration_s: {min_d if min_d is not None else 'n/a'}")
+                L.append("")
+        else:
+            L.append("- no phase timing data (worker.log timestamps missing or unparsable)")
+            L.append("")
+
+        L.append("## 12. Token Usage (best-effort)")
+        token_section = r.get("token_usage_report", {})
+        if token_section.get("by_role"):
+            for role, agg in token_section["by_role"].items():
+                L.append(f"### {role}")
+                L.append(f"- tasks_with_usage: {agg.get('tasks', 0)}")
+                L.append(f"- total_tokens: {agg.get('total_tokens', 0)}")
+                L.append(f"- input_tokens: {agg.get('input_tokens', 0)}")
+                L.append(f"- output_tokens: {agg.get('output_tokens', 0)}")
+                L.append(f"- cache_read: {agg.get('cache_read', 0)}")
+                L.append("")
+            unavail = token_section.get("unavailable_tasks") or []
+            if unavail:
+                L.append(f"> Token usage unavailable for tasks: {', '.join(unavail)}")
+                L.append(f"> Reason: {token_section.get('note', 'provider did not report usage')}")
+                L.append("")
+        else:
+            L.append(f"- no token usage data available ({token_section.get('note', 'provider did not report usage')})")
+            L.append("")
+
+        L.append("## 13. Error Patterns")
+        err_pat = r.get("error_patterns", {})
+        total_err = err_pat.get("total_errors", 0)
+        if total_err:
+            L.append(f"- total error events in worker logs: {total_err}")
+            by_type = err_pat.get("errors_by_type") or {}
+            for etype, count in sorted(by_type.items()):
+                L.append(f"  - `{etype}`: {count}")
+            L.append("")
+            L.append("### Error Details")
+            for ev in err_pat.get("errors", [])[:20]:
+                tid = ev.get("task_id", "n/a")
+                role = ev.get("role", "n/a")
+                etype = ev.get("type", "unknown")
+                ts = ev.get("timestamp")
+                msg = ev.get("message")
+                L.append(f"- task `{tid}` ({role}): `{etype}` at {ts or 'n/a'}")
+                if msg:
+                    L.append(f"  - message: {msg}")
+            L.append("")
+        else:
+            L.append("- no error events detected in worker logs")
+            L.append("")
+
+        L.append("## 14. Retry & Error Details by Task")
+        retry = r.get("retry_error_details", {})
+        details = retry.get("by_task", [])
+        if details:
+            for d in details:
+                tid = d.get("task_id", "n/a")
+                role = d.get("role", "n/a")
+                state = d.get("state", "n/a")
+                phase = d.get("execution_phase", "n/a")
+                attempts = d.get("attempt_count", 0)
+                retries = d.get("retry_count", 0)
+                feedback = d.get("last_review_feedback")
+                timing = d.get("phase_timing")
+                error_events = d.get("error_events") or []
+                L.append(f"- task `{tid}` ({role}): state={state}, phase={phase}, attempts={attempts}, retries={retries}")
+                if timing:
+                    L.append(f"  - duration_s: {timing.get('duration_s')}, first_event_at: {timing.get('first_event_at')}, last_event_at: {timing.get('last_event_at')}")
+                if feedback:
+                    L.append(f"  - review_feedback: {str(feedback)[:200]}")
+                if error_events:
+                    L.append(f"  - error_events: {len(error_events)}")
+                    for ev in error_events[:5]:
+                        L.append(f"    - `{ev.get('type')}`: {str(ev.get('message') or ev.get('timestamp'))[:100]}")
+            L.append("")
+        else:
+            L.append("- no retry/error details available")
             L.append("")
 
         if r.get("warnings"):
