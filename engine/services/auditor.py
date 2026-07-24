@@ -259,7 +259,8 @@ class RunAuditor:
             actor_role, task_id = self._parse_actor_key(key)
             t = task_map.get(task_id)
             error_events = task_turn.get("error_events") or []
-            role = (t.assigned_role if t else actor_role) or "UNKNOWN"
+            # Use actor_role from manifest key as primary role (same task can have CODER + REVIEWER logs)
+            role = actor_role or (t.assigned_role if t else "UNKNOWN")
             entry = {
                 "task_id": task_id,
                 "role": role,
@@ -315,7 +316,7 @@ class RunAuditor:
                 continue
             actor_role, task_id = self._parse_actor_key(key)
             t = task_map.get(task_id)
-            role = (t.assigned_role if t else actor_role) or "UNKNOWN"
+            role = actor_role or (t.assigned_role if t else "UNKNOWN")
             role_agg = by_role.setdefault(role, {
                 "tasks": 0,
                 "total_duration_s": 0.0,
@@ -350,7 +351,7 @@ class RunAuditor:
                 unavailable_tasks.append(task_id)
                 continue
             t = task_map.get(task_id)
-            role = (t.assigned_role if t else actor_role) or "UNKNOWN"
+            role = actor_role or (t.assigned_role if t else "UNKNOWN")
             role_agg = by_role.setdefault(role, {
                 "tasks": 0,
                 "total_tokens": 0,
@@ -380,7 +381,7 @@ class RunAuditor:
         for key, task_turn in turn_by_task.items():
             actor_role, task_id = self._parse_actor_key(key)
             t = task_map.get(task_id)
-            role = (t.assigned_role if t else actor_role) or "UNKNOWN"
+            role = actor_role or (t.assigned_role if t else "UNKNOWN")
             for ev in task_turn.get("error_events") or []:
                 all_errors.append({
                     "task_id": task_id,
