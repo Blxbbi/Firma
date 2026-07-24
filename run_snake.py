@@ -19,6 +19,7 @@ from engine.providers.pi_provider import PiProvider
 from engine.models import Message, MessageType, TaskEvent
 from workers.planner import PlannerWorker
 from workers.executor import ExecutionWorker
+from workers.researcher import ResearcherWorker
 from engine.settings import DB_DIR, BASE_DIR, FIRMA_TRANSPORT, PIMESH_CREWS, PIMESH_MODELS
 from engine.services.verifiers.scope_verifier_adapter import ScopeVerifierAdapter
 
@@ -26,7 +27,7 @@ from engine.services.verifiers.scope_verifier_adapter import ScopeVerifierAdapte
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(name)s: %(message)s')
 logger = logging.getLogger("SNAKE_RUN")
 
-async def run_worker_sim(run_id: str, transport: InternalTransport, planner: PlannerWorker, executor: ExecutionWorker):
+async def run_worker_sim(run_id: str, transport: InternalTransport, planner: PlannerWorker, executor: ExecutionWorker, researcher: ResearcherWorker):
     """
     Simulates a worker harness that consumes tasks from the transport and routes them to workers.
     """
@@ -77,6 +78,16 @@ async def run_worker_sim(run_id: str, transport: InternalTransport, planner: Pla
                     await transport.publish_response(role=role, payload=payload_to_send)
                     logger.info(f"[WorkerSim] Review approval sent for task {task_id}")
                     continue
+                elif role == "RESEARCHER":
+                    logger.info(f"[WorkerSim] Processing RESEARCHER task {task_id}")
+                    project_root = msg.get("project_root") or str(BASE_DIR)
+                    response = await researcher.handle_request(
+                        project_id=run_id,
+                        user_prompt=prompt,
+                        task_id=task_id,
+                        run_id=run_id,
+                        project_root=project_root,
+                    )
                 else:
                     logger.warning(f"Unknown role {role}, skipping.")
                     continue
@@ -158,6 +169,7 @@ async def main_logic():
     provider = NvidiaProvider(api_key="REDACTED_NVIDIA_KEY")
     planner = PlannerWorker(provider=provider, model_name="meta/llama-3.1-70b-instruct")
     executor = ExecutionWorker(provider=provider, model_name="meta/llama-3.1-70b-instruct")
+    researcher = ResearcherWorker(provider=provider, model_name="meta/llama-3.1-70b-instruct")
     
     receiver_task = None
     worker_task = None
@@ -196,7 +208,7 @@ async def main_logic():
         shared_transport = InternalTransport()
         controller.transport_factory = lambda: shared_transport
         await controller.start_run(run_id)
-        worker_task = asyncio.create_task(run_worker_sim(run_id, shared_transport, planner, executor))
+        worker_task = asyncio.create_task(run_worker_sim(run_id, shared_transport, planner, executor, researcher))
 
     try:
         last_status = None

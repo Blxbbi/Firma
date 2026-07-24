@@ -40,3 +40,21 @@ nul
 .Trash-*
 
 # Base sessions live under data/, but we keep the committed baseline folder structure via .gitkeep instead of the actual JSONL files
+
+/.crew/
+/.crew
+!.crew/artifacts/
+!.crew/graphs/
+!.crew/artifacts/.gitkeep
+!.crew/graphs/.gitkeep
+
+# Temp debug output / one-off diagnostics
+run_pi_mesh.pid
+tmp_audit_test/
+tools/check_auditor_new_sections.py
+tools/check_crew_logs.py
+tools/check_run_tokens.py
+tools/check_run_tokens_detailed.py
+tools/check_run_tokens_e1c5edbd.py
+tools/check_worker_log_format.py
+tools/update_manifest.py

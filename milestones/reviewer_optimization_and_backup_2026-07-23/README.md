@@ -1,4 +1,4 @@
-# Meilenstein: Reviewer-Optimierung & GitHub-Backup
+# Meilenstein: Reviewer-Optimierung & GitHub-Backup + ResearcherWorker
 **Datum:** 2026-07-23  
 **Status:** ✅ Erfolgreich abgeschlossen  
 
@@ -59,8 +59,31 @@ Dieser Meilenstein dokumentiert die erfolgreiche Behebung des REVIEWER-Schema-Bu
 - E2E-Run `e9f7b88c-215e-4f59-aec8-9747f394a86b`: **3/3 Tasks erfolgreich**
 - E2E-Run `ef913b47-537d-4c03-b5cc-8d0012573215`: **Token/Turn-Reduzierung verifiziert**
 - Test-Suite: **alle Tests bestanden**
+- Researcher-Smoke-Test (`tests/test_researcher_smoke.py`): **PASS**
+- Researcher-Pipeline-Smoke (`tests/test_researcher_pipeline_smoke.py`): **PASS**
 
-## Nächste Schritte
-- Ggf. `clean-backup`-Branch auf GitHub löschen
-- Ggf. Default-Branch auf `clean-backup-2` umstellen
-- CODER-/PLANNER-Optimierung falls gewünscht
+## Erweiterungen
+
+### 5. ResearcherWorker Implementierung
+- **Problem:** RESEARCHER-Rolle war nur als Persona definiert, kein ausführbarer Worker
+- **Lösung:** `workers/researcher.py` mit `ResearcherWorker`-Klasse
+  - **In-Process-Pfad:** `handle_request()` nimmt Assignment-Daten, liest Projektdateien unter `project_root`, erzeugt `research/brief.md`
+  - **Dummy-Mode:** Ermöglicht Smoke-Tests ohne LLM-Aufruf
+  - **Provider-Pfad:** Nutzt `provider.generate_json()` mit JSON-Schema `{brief_markdown: string}`
+  - **Output:** `RESEARCH_COMPLETE`-Event mit einem Artefakt `research/brief.md`
+
+### 6. Researcher-Pipeline-Smoke-Test
+- **`tests/test_researcher_smoke.py`:** Verifiziert Brief-Struktur mit Dummy-Provider
+- **`tests/test_researcher_pipeline_smoke.py`:** Vollständiger Durchlauf RESEARCHER → PLANNER → CODER → REVIEWER mit Mock-Providern
+  - Ergebnis: **COMPLETED**
+
+### 7. PiMesh-Spezifikation für Researcher
+- `engine/transport/pi_mesh_transport.py::_build_spec_markdown()` enthält präzise Researcher-Anweisung:
+  - Schritt 1: Response-Datei schreiben
+  - Schritt 2: `research/brief.md` mit festem Sections-Schema
+  - Citations-Pflicht (`file:`, `line:`, `evidence:`)
+  - Read-only Vertrag
+  - Projekt-Exploration unter `.pi/work/{run_id}/{task_id}/project/`
+
+### 8. Run-Snake-Integration
+- `run_snake.py` instanziiert `ResearcherWorker` und routet `RESEARCHER`-Aufgaben durch den Worker-Harness
