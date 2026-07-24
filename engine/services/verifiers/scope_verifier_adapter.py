@@ -16,6 +16,7 @@ from sqlalchemy import select
 from engine.services.verification_registry import BaseVerifier
 from engine.services.verifiers.scope_verifier import verify_scope
 from engine.services.ingest_context import get_ingest, get_task_scope
+from engine.services.task_baseline import resolve_baseline_for_task
 from engine.models import Task, TaskEvent
 
 logger = logging.getLogger(__name__)
@@ -42,9 +43,33 @@ class ScopeVerifierAdapter(BaseVerifier):
         if not scope:
             return True, "No scope defined for task; scope verifier skipped."
 
+        baseline_path = ing["baseline_path"]
+        # Per-task baseline (preferred): snapshot taken immediately before this task
+        # spawned. Falls back to the run-global baseline if no per-task snapshot exists
+        # (from-scratch / backward-compat safety).
+        per_task = None
+        if task and getattr(task, "state_revision", None) is not None:
+            per_task = resolve_baseline_for_task(run_id, task_id, task.state_revision)
+        if per_task:
+            import tempfile
+            tmp = None
+            try:
+                fd, tmp = tempfile.mkstemp(suffix=".json", prefix="scope_baseline_")
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(per_task, f, sort_keys=True, indent=2)
+                baseline_path = tmp
+                logger.info("[ScopeVerifier] Using per-task baseline for %s rev %d", task_id, task.state_revision)
+            except Exception:
+                if tmp and os.path.isfile(tmp):
+                    try:
+                        os.remove(tmp)
+                    except OSError:
+                        pass
+                baseline_path = ing["baseline_path"]
+
         result = verify_scope(
             workspace_root=ing["workspace_root"],
-            baseline_manifest_path=ing["baseline_path"],
+            baseline_manifest_path=baseline_path,
             scope_files=scope["scope_files"],
             protected_files=scope["protected_files"],
         )

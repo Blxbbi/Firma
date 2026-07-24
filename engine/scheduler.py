@@ -148,6 +148,14 @@ class Scheduler:
                                 assignment_payload["task_definition"]["protected_files"] = scope.get("protected_files") or []
                         except Exception as exc:
                             logger.warning("[Scheduler] Failed to load task scope for %s: %s", task.id, exc)
+                    # Per-task baseline snapshot for scoped verification (fixes false positives
+                    # when task-2 sees task-1's legitimate changes as protected drift).
+                    if task.assigned_role == "CODER":
+                        try:
+                            from engine.services.task_baseline import save_task_baseline
+                            save_task_baseline(run_id, task.id, task.state_revision)
+                        except Exception as exc:
+                            logger.warning("[Scheduler] Failed to save task baseline for %s: %s", task.id, exc)
                     # Phase 3 (Idee B): ground the PLANNER on the Researcher's read-only
                     # briefing. Handoff strictly via workspace file (no P2P). CODER tasks
                     # created by the plan inherit the same briefing pointer below.
