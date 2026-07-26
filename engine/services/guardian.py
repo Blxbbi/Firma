@@ -40,7 +40,7 @@ class GuardianPipeline:
         """Validate a plan_draft for structural sanity.
 
         Rules (v1):
-        - max 5 tasks total
+        - max 10 tasks total (adaptive planning)
         - CODER tasks must have at least 1 expected_artifacts
         - max 3 expected_artifacts per task
         """
@@ -48,8 +48,8 @@ class GuardianPipeline:
         tasks = plan_data.get("tasks") or []
         if len(tasks) == 0:
             issues.append("Plan has no tasks")
-        if len(tasks) > 5:
-            issues.append(f"Plan has {len(tasks)} tasks (max 5)")
+        if len(tasks) > 10:
+            issues.append(f"Plan has {len(tasks)} tasks (max 10)")
 
         for t in tasks:
             role = (t.get("role") or "CODER").upper()
@@ -673,10 +673,27 @@ class GuardianPipeline:
                 )
             elif transition_res.next_phase == ExecutionPhase.COMPLETE:
                 new_state = "VERIFIED"
+                # Clear stale review feedback so completed tasks are never treated
+                # as CODER-retry candidates in a later scheduler cycle.
+                await session.execute(
+                    sql_update(Task)
+                    .where(Task.id == task.id)
+                    .values(last_review_feedback=None)
+                )
             elif transition_res.next_phase == ExecutionPhase.FAILED_ITERATION_LIMIT:
                 new_state = "FAILED"
+                await session.execute(
+                    sql_update(Task)
+                    .where(Task.id == task.id)
+                    .values(last_review_feedback=None)
+                )
             elif transition_res.next_phase == ExecutionPhase.FAILED:
                 new_state = "FAILED"
+                await session.execute(
+                    sql_update(Task)
+                    .where(Task.id == task.id)
+                    .values(last_review_feedback=None)
+                )
             elif transition_res.next_role == AssignedRole.SYSTEM:
                 new_state = "SUBMITTED"
             else:
