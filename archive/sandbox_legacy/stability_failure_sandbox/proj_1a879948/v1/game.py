@@ -1,1 +1,0 @@
-def play(): print('Game running')\n

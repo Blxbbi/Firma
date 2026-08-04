@@ -8,8 +8,10 @@ scope/protected (registered by the Guardian at PLAN_SUBMITTED). Calls ``verify_s
 If there is no ingest context for the run, or no scope defined for the task, it is a
 no-op (pass) — from-scratch runs are completely unaffected.
 """
+import json
 import logging
-from typing import Tuple, List, Dict, Any
+import os
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import select
 

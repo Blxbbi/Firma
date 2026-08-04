@@ -19,6 +19,7 @@ Verifiziertes pi-messenger Task-Schema (crew/types.ts, crew/store.ts):
 import asyncio
 import json
 import os
+from engine.prompt_loader import get_prompt_loader
 import tempfile
 import shutil
 import datetime
@@ -30,6 +31,18 @@ import logging
 logger = logging.getLogger(__name__)
 
 WORKER_RESPONSE_SUFFIX = ".response.json"  # contract: worker_response.<task_id>.response.json
+
+# ============================================================
+# PROMPT CONTRACTS (zentral, einmal definiert)
+# ============================================================
+
+PLANNER_OUTPUT_CONTRACT_MD = get_prompt_loader().load_contract("planner_output")
+
+RESEARCHER_OUTPUT_CONTRACT_MD = get_prompt_loader().load_contract("researcher_output")
+
+CODER_OUTPUT_CONTRACT_MD = get_prompt_loader().load_contract("coder_output")
+
+REVIEWER_OUTPUT_CONTRACT_MD = get_prompt_loader().load_contract("reviewer_output")
 
 
 class PiTaskFile:
@@ -128,6 +141,44 @@ class PiMeshTransport(WorkerTransport):
     def _worker_response_filename(self, task_id: str) -> str:
         return f"worker_response.{task_id}{WORKER_RESPONSE_SUFFIX}"
 
+    @staticmethod
+    def _build_prd_context_md(td: Dict[str, Any]) -> str:
+        parts: list = []
+        tech_stack = td.get("tech_stack") or []
+        hard_constraints = td.get("hard_constraints") or []
+        if tech_stack or hard_constraints:
+            parts.append("## PRD Context\n")
+            if tech_stack:
+                parts.append("### Tech Stack\n")
+                for item in tech_stack:
+                    parts.append(f"- {item}\n")
+                parts.append("\n")
+            if hard_constraints:
+                parts.append("### Hard Constraints\n")
+                for item in hard_constraints:
+                    parts.append(f"- {item}\n")
+                parts.append("\n")
+        return "".join(parts) if parts else ""
+
+    @staticmethod
+    def _build_prd_context_md(td: Dict[str, Any]) -> str:
+        parts: list = []
+        tech_stack = td.get("tech_stack") or []
+        hard_constraints = td.get("hard_constraints") or []
+        if tech_stack or hard_constraints:
+            parts.append("## PRD Context\n")
+            if tech_stack:
+                parts.append("### Tech Stack\n")
+                for item in tech_stack:
+                    parts.append(f"- {item}\n")
+                parts.append("\n")
+            if hard_constraints:
+                parts.append("### Hard Constraints\n")
+                for item in hard_constraints:
+                    parts.append(f"- {item}\n")
+                parts.append("\n")
+        return "".join(parts) if parts else ""
+
     def _build_spec_markdown(self, payload: Dict[str, Any], crew_cwd: str, review_artifacts: Optional[Dict[str, str]] = None) -> str:
         """Die Spec, die der Crew-Worker als Task-Beschreibung liest.
 
@@ -141,11 +192,19 @@ class PiMeshTransport(WorkerTransport):
         role = payload.get("role")
         state_revision = payload.get("state_revision")
         target_event = self.ROLE_TARGET_EVENT.get(role, "CODE_SUBMITTED")
+        # For non-PLANNER roles, do NOT forward the full user prompt verbatim;
+        # it is meant for the PLANNER and causes confusion/context bloat for CODER/REVIEWER/RESEARCHER.
+        raw_prompt = payload.get("prompt")
+        if role == "PLANNER":
+            prompt_for_assignment = raw_prompt
+        else:
+            prompt_for_assignment = "Implementiere die folgende Task als " + role + "."
+
         assignment = {
             "run_id": run_id,
             "task_id": task_id,
             "state_revision": state_revision,
-            "prompt": payload.get("prompt"),
+            "prompt": prompt_for_assignment,
             "task_definition": payload.get("task_definition"),
         }
         resp_file = self._worker_response_filename(task_id)
@@ -173,11 +232,42 @@ class PiMeshTransport(WorkerTransport):
 
         parts: list = []
         parts.append(f"# Firma Task {task_id}  (Role: {role})\n\n")
-        parts.append(
-            "Du bist ein pi-messenger Crew-Worker im Auftrag der Firma-Execution-Engine.\n"
-            "Die Firma Engine ist der ALLEINIGE State-Owner. Du bist ein zustandsloser Worker:\n"
-            "du liest nur dieses Assignment, schreibst Artefakte + eine Response-Datei, und kehrst zurueck.\n\n"
-        )
+        # Map role to prompt directory name
+        role_to_prompt_dir = {
+            'PLANNER': 'planner',
+            'CODER': 'executor',
+            'REVIEWER': 'reviewer',
+            'RESEARCHER': 'researcher',
+            'VERIFIER': 'executor',  # Reuse executor prompts for verifier
+        }
+        prompt_dir = role_to_prompt_dir.get(role.upper(), role.lower())
+        # Load role-specific PiMesh system prompt
+        try:
+            system_prompt = get_prompt_loader().load(prompt_dir, 'pimesh_system')
+            # Inject review_checklist into reviewer prompt if present
+            if role.upper() == 'REVIEWER':
+                import os as _os
+                if _os.environ.get('CONTRACTOR_TEST_MODE') == '1':
+                    system_prompt = (
+                        "[CONTRACTOR_TEST_MODE] You are in E2E test mode. "
+                        "You MUST submit REVIEW_FAILURE for this task. "
+                        "Reason: 'E2E_TEST_HOOK: forced failure for REVIEW_FAILURE flow validation'. "
+                        "Do NOT write REVIEW_APPROVED under any circumstances.\n\n"
+                    ) + system_prompt
+                checklist = td.get('review_checklist') or []
+                if checklist:
+                    checklist_md = '\n'.join(f'- [ ] {item}' for item in checklist)
+                    system_prompt = system_prompt.replace('{review_checklist}', checklist_md)
+                else:
+                    system_prompt = system_prompt.replace('{review_checklist}', '_(no checklist provided — reject as REVIEW_FAILURE)_')
+            parts.append(system_prompt)
+        except Exception as e:
+            logger.warning(f"[PiMeshTransport] Failed to load pimesh_system for {role} (dir={prompt_dir}): {e}")
+            parts.append(
+                "Du bist ein pi-messenger Crew-Worker im Auftrag der Firma-Execution-Engine.\n"
+                "Die Firma Engine ist der ALLEINIGE State-Owner. Du bist ein zustandsloser Worker:\n"
+                "du liest nur dieses Assignment, schreibst Artefakte + eine Response-Datei, und kehrst zurueck.\n\n"
+            )
         parts.append("## Assignment (TASK_ASSIGNMENT)\n\n")
         parts.append(f"```json\n{json.dumps(assignment, indent=2, ensure_ascii=False)}\n```\n\n")
 
@@ -185,6 +275,11 @@ class PiMeshTransport(WorkerTransport):
             parts.append(
                 "## Deine Aufgabe (AUTHORITATIVE)\n"
                 "Du erstellst EINEN Plan (`plan_draft`). Schreibe KEINEN Code.\n\n"
+                "Delta-Erkennung:\n"
+                "- Research Brief erwähnt Aenderung an bestehendem Projekt (z.B. 'Contact-Sektion hinzufuegen')?\n"
+                "  → Plane nur diese Aenderung (1-3 Tasks).\n"
+                "- Research Brief beschreibt neues Projekt?\n"
+                "  → Plane vollstaendige Umsetzung (3-10 Tasks).\n\n"
             )
             if research_brief:
                 parts.append("## Research Brief (CONTEXT)\n")
@@ -206,11 +301,29 @@ class PiMeshTransport(WorkerTransport):
                 "- Use `read` ONLY for `.pi/messenger/crew/tasks/<TASK_ID>.md`.\n"
                 "- Use `write` ONLY for the worker response file specified below.\n"
                 "- VERBOTEN: `edit`, `bash`, `glob`, `grep`, further reads, further writes.\n\n"
-                "Decide in ONE PASS whether the CODER implementation meets ALL acceptance criteria below. "
-                "Output must be either `REVIEW_APPROVED` or `REVIEW_FAILURE` plus max 5 bullet issues. "
+                "Decide in ONE PASS whether the CODER implementation meets ALL criteria below. "
+                "Output must be either `REVIEW_APPROVED` or `REVIEW_FAILURE` plus structured findings. "
                 "First action: write the worker response file. Then stop immediately.\n\n"
                 "If you cannot decide within one pass, choose REVIEW_FAILURE with reason 'unclear'.\n\n"
             )
+            parts.append(REVIEWER_OUTPUT_CONTRACT_MD)
+            checklist = td.get("review_checklist") or []
+            if checklist:
+                parts.append("### PRD Checklist (MUST PASS ALL)\n")
+                for item in checklist:
+                    parts.append(f"- [ ] {item}\n")
+                parts.append(
+                    "\nFor EACH checklist item write: ✅ PASS or ❌ FAIL + concrete reason.\n"
+                    "If ANY item fails, the overall result is REVIEW_FAILURE.\n\n"
+                )
+            hard_constraints = td.get("hard_constraints") or []
+            if hard_constraints:
+                parts.append("### Hard Constraints (MUST PASS ALL)\n")
+                for item in hard_constraints:
+                    parts.append(f"- [ ] {item}\n")
+                parts.append(
+                    "\nThese are non-negotiable technical constraints. Verify implementation strictly adheres to each.\n\n"
+                )
             if criteria:
                 parts.append("### Acceptance Criteria (MUST PASS)\n")
                 for c in criteria:
@@ -225,66 +338,31 @@ class PiMeshTransport(WorkerTransport):
         elif role == "RESEARCHER":
             parts.append("## Your Task (AUTHORITATIVE)\n")
             parts.append(
-                "Deine Aufgabe besteht aus ZWEI Schritten. Beide sind PFLICHT.\n\n"
-                "### Schritt 1: Schreibe die Response-Datei (PRIORITÄT 1)\n"
-                "Schreibe SOFORT eine Datei namens `worker_response.{task_id}.response.json` in das Verzeichnis\n"
-                "`.pi/messenger/crew/` (DASSELBE Verzeichnis wie `research/`, NICHT in `tasks/`).\n\n"
-                "Inhalt (genau dieses Schema):\n"
-                "```\n"
-                "protocol_version: 1.0\n"
-                "message_id: <eindeutige uuid>\n"
-                "task_id: {task_id}\n"
-                "run_id: {run_id}\n"
-                "state_revision: {state_revision}\n"
-                "event: {target_event}\n"
-                "sender_role: {role}\n"
-                '  artifacts: [{"path": "research/brief.md", "action": "CREATE", "content": null}]\n'
-                "timestamp: {now}\n"
-                "logs: <freier Status-Text>\n"
-                "```\n\n"
-                "### Schritt 2: Schreibe den Brief\n"
-                "Schreibe `research/brief.md` (relativ zu `.pi/messenger/crew/`, "
-                "also `.pi/messenger/crew/research/brief.md`) mit deinem Brief.\n\n"
-                "### Projekt-Exploration (INGEST MODE)\n"
-                "- Lies die Dateien unter `.pi/work/{run_id}/{task_id}/project/` (relativ zu diesem\n"
-                "  Arbeitsverzeichnis). Das ist der aktuelle Projektstand (read-only Referenz).\n"
-                "- Identifiziere, welche Dateien für das Ziel relevant sind.\n"
-                "- Notiere konkrete Stellen (Dateiname + Zeile oder Suchstring).\n\n"
-                "### Citation Guards (PFLICHT)\n"
-                "Für jede Behauptung über den Code MUSST du eine Citation angeben:\n"
-                "- `file: <relativer Pfad>` (z.B. `file: style.css`)\n"
-                "- `line: <Zeilennummer oder Bereich>` (z.B. `line: 42` oder `line: 10-25`)\n"
-                "- `evidence: <exaktes Snippet oder Suchstring>` (z.B. `evidence: button { color: red; }`)\n"
-                "Ohne Citation wird die Behauptung als Halluzination gewertet.\n\n"
-                "### Brief-Struktur\n"
-                "Schreibe `research/brief.md` MIT folgenden Abschnitten:\n"
-                "```\n"
-                "# Research Brief\n\n"
-                "## User Goal (PRIMARY)\n"
-                "<Der User-Auftrag, exakt wie oben im Assignment. Das ist deine Hauptfragestellung.>\n\n"
-                "## Project Findings\n"
-                "<was im Code steht, mit file:/line:/evidence: Referenzen>\n\n"
-                "## Recommendations for Planner\n"
-                "<konkrete Vorschläge, wo anfassen, welche Dateien, welche Technologien>\n\n"
-                "## Risks/Constraints\n"
-                "<was zu beachten ist, welche Dateien geschützt sind, welche Constraints>\n"
-                "```\n\n"
-                "### Primary-Input Vertrag\n"
-                "- Dein Brief leitet sich AUS dem User-Auftrag ab, nicht aus Vorannahmen.\n"
-                "- Beginne `research/brief.md` mit dem User Goal.\n"
-                "- Wenn der User eine Website will, dann explorierst du danach;\n"
-                "  nicht nach irgendwelchen festen Snake/Spiel-Vorgaben.\n\n"
-                "### Read-only (HART)\n"
-                "- Du änderst KEINE Projektdatei.\n"
-                "- Du schreibst NUR `research/brief.md`.\n"
-                "- Keine Rekursion, kein Plan, kein Code.\n\n"
+                "Schreibe `research/brief.md`. Schritte:\\n"
+                "1) Explore `.pi/work/{run_id}/{task_id}/project/` (read-only).\\n"
+                "2) Schreibe Brief mit User Goal, Findings (mit Citations), Recommendations, Risks/Constraints.\\n\\n"
+                "Delta-Erkennung: Wenn `index.html`/`style.css`/`app.js` existieren → Aenderung beschreiben, nicht Neubau.\\n\\n"
+                "Citation Guards (PFLICHT): Für jede Behauptung: `file:`, `line:`, `evidence:`.\\n\\n"
+                "Brief-Struktur:\\n"
+                "```\\n"
+                "# Research Brief\\n\\n"
+                "## User Goal (PRIMARY)\\n"
+                "<Der User-Auftrag, exakt wie oben im Assignment.>\\n\\n"
+                "## Project Findings\\n"
+                "<was im Code steht, mit file:/line:/evidence: Referenzen>\\n\\n"
+                "## Recommendations for Planner\\n"
+                "<konkrete Vorschläge, wo anfassen>\\n\\n"
+                "## Risks/Constraints\\n"
+                "<was zu beachten ist>\\n"
+                "```\\n\\n"
             )
+            parts.append(self._build_prd_context_md(td))
         else:  # CODER
             parts.append("## SCOPE CONTRACT (HARD)\n")
             scope_files = td.get("scope_files") or []
             protected_files = td.get("protected_files") or []
             if scope_files:
-                parts.append("You are ALLOWED to modify ONLY these files:\n")
+                parts.append("You are ALLOWED to READ these files (reference only, do NOT modify):\n")
                 for sf in scope_files:
                     parts.append(f"- `{sf}`\n")
                 parts.append("\n")
@@ -306,14 +384,24 @@ class PiMeshTransport(WorkerTransport):
                 "Du darfst NUR die in `task_definition` genannten Dateien anfassen "
                 "(keine weiteren Dateien schreiben).\n\n"
             )
-            parts.append("## ONE-PASS Contract (V1)\n")
-            parts.append(
-                "- Erlaubt: `read` NUR VOR dem ersten `write` (Task-Spec + staged Projektdateien).\n"
-                "- Verboten: `read` NACH dem ersten `write`, `bash`, `edit`.\n"
-                "- Wenn du denkst, du musst iterieren → beende mit `TASK_FAILED` + Grund.\n"
-                "- Abschluss: alle geforderten Dateien schreiben, dann `worker_response` schreiben und sofort stoppen.\n\n"
-            )
-            # F4: ingest mode -> tell the worker where the existing project lives.
+            expected = td.get("expected_artifacts") or []
+            if expected:
+                parts.append("## WRITE TARGETS (STRICT)\n")
+                parts.append("You MUST write to THESE EXACT PATHS (relative to `.pi/messenger/crew/`):\n")
+                for art in expected:
+                    if isinstance(art, dict):
+                        path = art.get("path") or "(unknown)"
+                        action = art.get("action") or "CREATE"
+                    else:
+                        path = getattr(art, "path", "(unknown)")
+                        action = getattr(art, "action", "CREATE")
+                    parts.append(f"- `{path}`  ({action})\n")
+                parts.append(
+                    "\nDo NOT create subdirectories unless the path explicitly includes them. "
+                    "Do NOT rename files or change extensions. "
+                    "The verifier matches paths exactly.\n\n"
+                )
+            parts.append(CODER_OUTPUT_CONTRACT_MD)
             try:
                 from engine.services.ingest_context import get_ingest
                 ing = get_ingest(run_id)
@@ -322,45 +410,37 @@ class PiMeshTransport(WorkerTransport):
             if ing:
                 parts.append(
                     "## Existing Project (INGEST MODE)\n"
-                    "A read-only copy of the current project is staged under "
-                    "`.pi/work/{run_id}/{task_id}/project/` (relative to this working directory). "
-                    "Read existing files from there and perform a **surgical edit** (change only what is required). "
-                    "Write your edited files to the **top level** of `.pi/messenger/crew/` "
-                    "(e.g. `style.css`, NOT `project/style.css`) so the kernel can materialize them. "
-                    "Do NOT modify the staged copy under `.pi/work/` — it is reference only.\n\n"
+                    "Read-only project copy: `.pi/work/{run_id}/{task_id}/project/`.\n"
+                    "Do surgical edits only. Write to `.pi/messenger/crew/` top-level (e.g. `style.css`).\n\n"
                     .format(run_id=run_id, task_id=task_id)
                 )
             if criteria:
-                parts.append("### WICHTIG: Verifier / Kernel Acceptance Criteria (MUST PASS)\n")
-                parts.append("Diese Kriterien werden HART geprueft. Implementiere sie WORTWORTLICH.\n")
+                parts.append("### Acceptance Criteria (MUST PASS)\n")
                 for c in criteria:
                     parts.append(f"- `{c}`\n")
                 parts.append(
-                    "Beispiel: falls `innerHTML` gefordert ist, nutze `innerHTML`, NICHT `textContent`.\n\n"
+                    "Implementiere die Kriterien WORTWORTLICH. "
+                    "Beispiel: falls `innerHTML` gefordert ist, nutze `innerHTML`, nicht `textContent`.\\n\\n"
                 )
                 feedback = td.get("previous_feedback")
                 if feedback:
-                    parts.append("## ⚠️ PREVIOUS ATTEMPT WAS REJECTED BY THE REVIEWER\n")
+                    parts.append("## ⚠️ PREVIOUS ATTEMPT REJECTED\n")
                     parts.append(
-                        "Dein vorheriger Versuch fuer diese Task wurde vom REVIEWER ABGELEHNT — "
-                        "die Aufgabe ist NICHT abgeschlossen. Die folgende Kritik MUSST du beheben. "
-                        "Behalte den uebrigen Ansatz bei, schreibe die Dateien NEU (nicht nur "
-                        "behaupten, sie seien fertig), und erzeuge anschliessend eine FRISCHE "
-                        "worker_response-Datei mit dem im Assignment angegebenen state_revision:\n\n"
+                        "Dein vorheriger Versuch wurde abgelehnt. Behebe die Kritik, schreibe Dateien NEU,\n"
+                        "und erzeuge eine frische `worker_response` mit dem aktuellen `state_revision`.\n\n"
                     )
                     parts.append(f"> {feedback}\n\n")
+            parts.append(self._build_prd_context_md(td))
 
-        parts.append("## Output Contract (MUSS exakt eingehalten werden)\n")
+        parts.append("## Output Contract (exakt einhalten)\n")
         parts.append(
-            f"Schreibe ANSCHLIESSEND eine Datei namens **`{resp_file}`** in das Verzeichnis "
-            "`.pi/messenger/crew/`** (dasselbe Verzeichnis, das den `tasks/`-Unterordner enthaelt; "
-            "NICHT im tasks/-Ordner), mit DIESEM Schema:\n"
+            f"Schreibe `{resp_file}` in `.pi/messenger/crew/` (ACHTUNG: Ordner beginnt mit PUNKT `.pi`).\n"
+            "Schema:\n"
         )
         parts.append("```json\n")
         parts.append('{\n')
-        parts.append('  "protocol_version": "1.0",\n')
-        parts.append('  "message_id": "<eindeutige uuid>",\n')
-        parts.append("  # WICHTIG: message_id MUSS ECHT eindeutig sein (z.B. task-3-a1b2c3d4), KEINE Platzhalter kopieren!\n")
+        parts.append(f'  "protocol_version": "1.0",\n')
+        parts.append(f'  "message_id": "<eindeutige uuid>",\n')
         parts.append(f'  "task_id": "{task_id}",\n')
         parts.append(f'  "run_id": "{run_id}",\n')
         parts.append(f'  "state_revision": {state_revision},\n')
@@ -368,39 +448,30 @@ class PiMeshTransport(WorkerTransport):
         parts.append(f'  "sender_role": "{role}",\n')
         parts.append(f'  "artifacts": [{{"path": "{example_path}", "action": "CREATE", "content": null}}],\n')
         parts.append(f'  "timestamp": "{now}",\n')
-        parts.append('  "logs": "<freier Status-Text>"\n')
+        parts.append('  "logs": "<Status-Text>"\n')
         parts.append("}\n```\n\n")
 
-        parts.append("### Erlaubte Enums\n")
+        parts.append("### Enums\n")
         parts.append(
-            "- event: PLAN_SUBMITTED | CODE_SUBMITTED | REVIEW_APPROVED | REVIEW_FAILURE | TASK_FAILED\n"
-            f"  - Deine Rolle ({role}) MUSS event=`{target_event}` liefern (ausser bei Fehler: TASK_FAILED).\n"
-            "- sender_role: PLANNER | CODER | VERIFIER | REVIEWER | SYSTEM  (hier: {role})\n"
+            f"- event: PLAN_SUBMITTED | CODE_SUBMITTED | REVIEW_APPROVED | REVIEW_FAILURE | TASK_FAILED\n"
+            f"  - Deine Rolle ({role}) MUSS event=`{target_event}` liefern.\n"
+            "- sender_role: PLANNER | CODER | VERIFIER | REVIEWER | SYSTEM\n"
             "- artifacts[].action: CREATE | UPDATE | DELETE\n\n"
         )
         parts.append("### Artefakt-Regeln\n")
         parts.append(
-            "- Schreibe Artefakt-Dateien in `.pi/messenger/crew/` (relativ zu diesem Verzeichnis, "
-            "z.B. `index.html`, `style.css`, `app.js`). KEINE absoluten Pfade, KEINE `..`.\n"
-            "- Bei CREATE/UPDATE: `content` = null (der Firma-Receiver fuellt es aus der geschriebenen Datei).\n"
-            "- Bei DELETE: `content` MUSS null sein.\n"
-            "- `path` ist IMMER relativ zu `.pi/messenger/crew/`. KEINE absoluten Pfade, KEINE `..`.\n"
-            "- Schreibe die Artefakt-Dateien VOR der Response-Datei.\n\n"
+            "- Schreibe Dateien in `.pi/messenger/crew/` (relativ, z.B. `app.js`).\n"
+            "- Pfade: relativ, keine `..`, keine absoluten Pfade.\n"
+            "- CREATE/UPDATE: `content` = null. DELETE: `content` = null.\n"
+            "- Reihenfolge: erst Artefakte, dann `{resp_file}` atomar schreiben.\n\n"
+                .format(resp_file=resp_file)
         )
         if role == "PLANNER":
+            parts.append(PLANNER_OUTPUT_CONTRACT_MD)
             parts.append(
-                "### plan_draft (nur PLANNER)\n"
-                "`plan_draft` MUSS ein PlanDraftSchema sein (kein freier Text):\n"
-                "```json\n"
-                "{\n"
-                '  "plan_name": "<name>",\n'
-                '  "tasks": [{"id": "task-1", "description": "...", "dependencies": [], '
-                '"expected_artifacts": [{"path": "<file>", "type": "CREATE"}], '
-                '"acceptance_criteria": ["..."]}]\n'
-                "}\n```\n\n"
-                "**WICHTIG: Schreibe die Datei EXAKT als** `plan_draft.{task_id}.json` **in** `.pi/messenger/crew/`.\n"
-                "**Der PLANNER schreibt KEINE Code-Dateien** — `artifacts` bleibt `[]`, "
-                "die Dateien werden spaeter von der CODER-Rolle erzeugt.\n\n"
+                "**Hinweis:** `artifacts` bleibt `[]`, Code-Dateien werden von CODER erzeugt.\\n"
+                "**SEQUENCE:** Fuer aufeinanderfolgende CODER-Aufgaben setze `dependencies` (task-2 → task-1, task-3 → task-2),\\n"
+                "sonst greift der Scope-Checker auf den Initialzustand und schlägt falsch an.\\n\\n"
             )
         parts.append("### Reihenfolge (wichtig fuer den Receiver)\n")
         parts.append(

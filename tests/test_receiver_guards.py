@@ -148,10 +148,74 @@ def test_new_agent_end_triggers_guard_after_assigned_at():
     print("PASS: new agent_end triggers guard when mtime > assigned_at")
 
 
+def test_rate_limit_detection_publishes_task_failed():
+    transport, receiver, root = _make_receiver()
+    crew_cwd = os.path.join(root, 'pimesh/coding-crew')
+    log_path = os.path.join(crew_cwd, '.pi', 'work', 'run-X', 'task-1', 'worker.log')
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    with open(log_path, 'w', encoding='utf-8') as f:
+        f.write(json.dumps({'type': 'session'}) + '\n')
+        f.write(json.dumps({
+            'type': 'message_start',
+            'message': {'errorMessage': '429 "Rate limit exceeded"'}
+        }) + '\n')
+        f.write(json.dumps({
+            'type': 'auto_retry_end',
+            'success': False,
+            'finalError': '429 "Rate limit exceeded"'
+        }) + '\n')
+
+    out = receiver.scan_once()
+    events = [it['payload']['event'] for it in out]
+    assert 'TASK_FAILED' in events, f"expected TASK_FAILED, got {events}"
+    fail = [it for it in out if it['payload']['event'] == 'TASK_FAILED'][0]
+    assert fail['payload']['logs'].startswith('RATE_LIMITED:')
+    assert fail['role'] == 'SYSTEM'
+    print("PASS: rate-limit detection publishes TASK_FAILED")
+
+
+def test_no_rate_limit_when_worker_response_exists():
+    transport, receiver, root = _make_receiver()
+    crew_cwd = os.path.join(root, 'pimesh/coding-crew')
+    worker_dir = os.path.join(crew_cwd, '.pi', 'messenger', 'crew')
+    os.makedirs(worker_dir, exist_ok=True)
+    resp = {
+        "protocol_version": "1.0",
+        "message_id": "resp-1",
+        "task_id": "task-1",
+        "run_id": "run-X",
+        "state_revision": 1,
+        "event": "CODE_SUBMITTED",
+        "sender_role": "CODER",
+        "timestamp": "2026-01-01T00:00:00+00:00",
+        "logs": "",
+        "artifacts": [],
+        "plan_draft": None,
+    }
+    with open(os.path.join(worker_dir, f'worker_response.task-1{WORKER_RESPONSE_SUFFIX}'), 'w', encoding='utf-8') as f:
+        json.dump(resp, f)
+
+    log_path = os.path.join(crew_cwd, '.pi', 'work', 'run-X', 'task-1', 'worker.log')
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    with open(log_path, 'w', encoding='utf-8') as f:
+        f.write(json.dumps({'type': 'session'}) + '\n')
+        f.write(json.dumps({
+            'type': 'message_start',
+            'message': {'errorMessage': '429 "Rate limit exceeded"'}
+        }) + '\n')
+
+    out = receiver.scan_once()
+    events = [it['payload']['event'] for it in out]
+    assert 'TASK_FAILED' not in events, f"rate-limit guard should not fire when worker_response exists, got {events}"
+    print("PASS: no rate-limit guard when worker_response exists")
+
+
 if __name__ == "__main__":
     test_fail_fast_on_agent_end_without_worker_response()
     test_no_guard_when_worker_response_exists()
     test_no_progress_timeout_triggers_before_hard_timeout()
     test_stale_agent_end_ignored_before_assigned_at()
     test_new_agent_end_triggers_guard_after_assigned_at()
+    test_rate_limit_detection_publishes_task_failed()
+    test_no_rate_limit_when_worker_response_exists()
     print("\nALL RECEIVER GUARD TESTS PASSED")

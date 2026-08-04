@@ -31,11 +31,11 @@ def test_rejects_empty_tasks():
     assert "no tasks" in issues[0]
 
 
-def test_rejects_more_than_five_tasks():
-    tasks = [{"id": f"t{i}", "role": "CODER", "expected_artifacts": [{"path": "f.py", "type": "CREATE"}]} for i in range(6)]
+def test_rejects_more_than_ten_tasks():
+    tasks = [{"id": f"t{i}", "role": "CODER", "expected_artifacts": [{"path": "f.py", "type": "CREATE"}]} for i in range(11)]
     ok, issues = _validate({"plan_name": "x", "tasks": tasks})
     assert ok is False
-    assert any("max 5" in i for i in issues)
+    assert any("max 10" in i for i in issues)
 
 
 def test_rejects_coder_task_without_expected_artifacts():
@@ -77,3 +77,46 @@ def test_allows_non_coder_without_artifacts():
     ok, issues = _validate(plan)
     assert ok is True
     assert issues == []
+
+
+def test_rejects_duplicate_expected_artifacts_across_coder_tasks():
+    plan = {
+        "plan_name": "x",
+        "tasks": [
+            {"id": "task-1", "role": "CODER", "expected_artifacts": [{"path": "index.html", "type": "CREATE"}]},
+            {"id": "task-2", "role": "CODER", "expected_artifacts": [{"path": "index.html", "type": "UPDATE"}]},
+        ],
+    }
+    ok, issues = _validate(plan)
+    assert ok is False
+    assert any("File ownership violation" in i and "index.html" in i for i in issues)
+    assert any("task-1" in i and "task-2" in i for i in issues)
+
+
+def test_accepts_unique_ownership():
+    plan = {
+        "plan_name": "x",
+        "tasks": [
+            {"id": "task-1", "role": "CODER", "expected_artifacts": [{"path": "index.html", "type": "CREATE"}]},
+            {"id": "task-2", "role": "CODER", "expected_artifacts": [{"path": "style.css", "type": "CREATE"}]},
+            {"id": "task-3", "role": "CODER", "expected_artifacts": [{"path": "app.js", "type": "CREATE"}]},
+        ],
+    }
+    ok, issues = _validate(plan)
+    assert ok is True
+    assert issues == []
+
+
+def test_plan_reject_message_contains_conflict_file_and_task_ids():
+    plan = {
+        "plan_name": "x",
+        "tasks": [
+            {"id": "task-1", "role": "CODER", "expected_artifacts": [{"path": "shared.css", "type": "CREATE"}]},
+            {"id": "task-2", "role": "CODER", "expected_artifacts": [{"path": "shared.css", "type": "UPDATE"}]},
+            {"id": "task-3", "role": "CODER", "expected_artifacts": [{"path": "index.html", "type": "CREATE"}]},
+        ],
+    }
+    ok, issues = _validate(plan)
+    assert ok is False
+    assert any("shared.css" in i for i in issues)
+    assert any("task-1" in i and "task-2" in i for i in issues)

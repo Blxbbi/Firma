@@ -17,11 +17,23 @@ import logging
 import os
 import shutil
 import subprocess
+import threading
 from typing import Optional
 
 from engine.settings import FIRMA_RESEARCH_WEB, FIRMA_RESEARCH_WEB_MAX_QUERIES, FIRMA_RESEARCH_WEB_TIMEOUT_S
 
 logger = logging.getLogger(__name__)
+
+
+def _close_log_when_done(proc: subprocess.Popen, log_f) -> None:
+    """Wait for the child process to exit, then close the log file handle."""
+    try:
+        proc.wait()
+    finally:
+        try:
+            log_f.close()
+        except Exception:
+            pass
 
 # Phase 2/3 (Idee A + Idee B): exclusions for the ingest project copy into the crew
 # workdir. We never copy .pi/ (worker metadata), .git/, or node_modules/ into the
@@ -56,7 +68,7 @@ class PiProvider:
         self.provider = provider
         self.model = model
         self.tools = tools
-        self.extension_dir = extension_dir or self._find_extension()
+        self.extension_dir = self._normalize_extension_dir(extension_dir or self._find_extension()) if (extension_dir or self._find_extension()) else None
 
     @staticmethod
     def tools_for_role(role: str, mode: Optional[str] = None) -> str:
@@ -97,11 +109,30 @@ class PiProvider:
                 return found
         return "pi"
 
+    def _normalize_extension_dir(self, path: str) -> str:
+        """Convert backslashes to forward slashes for Windows paths used with pi.
+        
+        This prevents the shell args parser from interpreting escape sequences
+        like \n and breaking the --extension argument.
+        """
+        return path.replace("\\", "/")
+
+    def _normalize_exe_for_windows(self, exe: str) -> list:
+        """Return executable args suitable for subprocess on Windows.
+
+        `.cmd` / `.bat` need explicit shell execution on Windows; otherwise `Popen`
+        can fail with `FileNotFoundError` even though the file exists.
+        """
+        if os.name == "nt" and isinstance(exe, str) and exe.lower().endswith((".cmd", ".bat")):
+            return ["cmd.exe", "/c", exe]
+        return [exe]
+
     def build_args(self, prompt: str, model: Optional[str] = None, provider: Optional[str] = None, session_id: Optional[str] = None, session_dir: Optional[str] = None) -> list:
-        exe = self._resolve_exe()
+        raw_exe = self._resolve_exe()
+        exe_args = self._normalize_exe_for_windows(raw_exe)
         prov = provider or self.provider
         mdl = model or self.model
-        args = [exe, "--mode", "json"]
+        args = exe_args + ["--mode", "json"]
         if session_id:
             # Collaborative (Phase 6.1): Session-Kontext tragen -- KEIN --no-session!
             args += ["--session-id", session_id, "--session-dir", str(session_dir)]
@@ -113,12 +144,18 @@ class PiProvider:
             args += ["--provider", prov, "--model", mdl]
         args += ["--tools", self.tools]
         if self.extension_dir:
-            args += ["--extension", self.extension_dir]
+            # Normalize extension dir to forward slashes to avoid shell escaping problems
+            normalized_ext_dir = self._normalize_extension_dir(self.extension_dir)
+            args += ["--extension", normalized_ext_dir]
         args += ["-p", prompt]
         return args
 
     @staticmethod
-    def build_assignment_prompt(task_id: str, correction_note: Optional[str] = None) -> str:
+    def build_assignment_prompt(
+        task_id: str,
+        role: str = "CODER",
+        correction_note: Optional[str] = None,
+    ) -> str:
         """Prompt fuer den Worker: lies die Task-Spec und folge dem Vertrag.
 
         Kein eingebettetes JSON (wird von `pi -p` abgeschnitten) -- der Worker
@@ -128,10 +165,18 @@ class PiProvider:
         durch Session-Kontinuitaet mitgeschleppte "Ich bin fertig"-Selbstaussage des
         Vorgaengers neutralisiert (Phase 6.2 Fix 1: Retry-Scrub).
         """
+        role_verb = {
+            "CODER": "implement the task by writing the required files",
+            "REVIEWER": "review the coder's implementation and write your assessment",
+            "PLANNER": "plan the task by creating a plan document",
+            "RESEARCHER": "research the topic and write your findings",
+            "VERIFIER": "verify the implementation against acceptance criteria",
+        }.get(role.upper(), "implement the task by writing the required files")
+
         base = (
             f"Read the file `.pi/messenger/crew/tasks/{task_id}.md` in the current working "
-            f"directory and follow its instructions EXACTLY: implement the task by writing the "
-            f"required files, then write the worker_response file named in the spec, then stop. "
+            f"directory and follow its instructions EXACTLY: {role_verb}, then write the "
+            f"worker_response file named in the spec, then stop. "
             f"Do not ask questions and do not call any mesh/pi_messenger tools."
         )
         if correction_note:
@@ -158,9 +203,10 @@ class PiProvider:
 
         effective_tools = tools if tools is not None else PiProvider.tools_for_role(role)
         provider = PiProvider(provider=prov, model=mdl, tools=effective_tools, extension_dir=self.extension_dir)
+        print('DEBUG_SPAWN extension_dir=', repr(provider.extension_dir), flush=True)
         project_workdir = provider._stage_ingest_project_if_needed(role, run_id, task_id, crew_cwd)
 
-        prompt = provider.build_assignment_prompt(task_id, correction_note=correction_note)
+        prompt = provider.build_assignment_prompt(task_id, role=role, correction_note=correction_note)
         if project_workdir:
             if role == "CODER":
                 prompt = (
@@ -206,35 +252,15 @@ class PiProvider:
         with open(prompt_file, "w", encoding="utf-8") as f:
             f.write(prompt)
 
-        # Inline-Fallback fuer den Fall, dass `read()` im pi-Tool-Layer kaputt ist
-        # (z.B. `.pad=`-Bug bei Argument-Serialization). Der Worker bekommt dann die
-        # kritischen Infos direkt im Prompt und kann ohne Dateizugriff arbeiten.
-        inline_fallback = ""
-        task_md_path = os.path.join(crew_cwd, ".pi", "messenger", "crew", "tasks", f"{task_id}.md")
-        if os.path.isfile(task_md_path):
-            try:
-                with open(task_md_path, "r", encoding="utf-8") as f:
-                    task_md_content = f.read()
-                inline_fallback = (
-                    f"\n\n"
-                    f"[INLINE ASSIGNMENT FALLBACK]\n"
-                    f"If you cannot read the prompt file above, use this inline assignment.\n"
-                    f"Do NOT call any read/write/edit/bash tools on `.pi/work/` or `.pi/messenger/crew/tasks/` "
-                    f"if they fail with path corruption (e.g. `.pad=`). Follow the instructions below directly.\n\n"
-                    f"--- FULL PROMPT ---\n"
-                    f"{prompt}\n\n"
-                    f"--- TASK SPEC ({task_id}.md) ---\n"
-                    f"{task_md_content}\n"
-                    f"[END INLINE ASSIGNMENT FALLBACK]"
-                )
-            except Exception:
-                inline_fallback = ""
-
+        # Short, deterministic prompt referencing the file.
+        # NOTE: do NOT inline the full prompt here — on Windows, the command line
+        # limit (~8191 chars) is easily exceeded by large prompts, causing
+        # "Die Befehlszeile ist zu lang" before the worker even starts.
+        # Use an absolute path so the worker cannot hallucinate a wrong relative path.
+        abs_prompt_path = os.path.abspath(prompt_file)
         short_prompt = (
-            f"Read your complete assignment from `.pi/work/{run_id}/{task_id}/prompt.txt` "
-            f"in the current working directory and follow it EXACTLY. "
-            f"Do not ask questions and do not call any mesh/pi_messenger tools."
-            f"{inline_fallback}"
+            f"Read your complete assignment from the file at path: {abs_prompt_path}\n"
+            f"Follow its instructions EXACTLY. Do not ask questions and do not call any mesh/pi_messenger tools."
         )
         # Per-task log to avoid collision across concurrent spawns.
         log_path = os.path.join(crew_cwd, ".pi", "work", run_id, task_id, "worker.log")
@@ -292,10 +318,29 @@ class PiProvider:
         log_f = open(log_path, "a", encoding="utf-8")
         model_label = f"{self.provider}/{self.model}" if (self.provider and self.model) else "pi-default"
         logger.info(f"[PiProvider] spawn worker in {crew_cwd} (model={model_label}); log={log_path}")
+        print('DEBUG_SPAWN_ARGS', args, flush=True)
         proc = subprocess.Popen(
             args,
             cwd=crew_cwd,
             stdout=log_f,
             stderr=subprocess.STDOUT,
         )
+        # Keep the log file handle alive for the lifetime of the child process.
+        # Without this, the handle can be closed/garbage-collected on Windows,
+        # causing the worker to die silently before it can write a response.
+        try:
+            proc._log_f = log_f  # type: ignore[attr-defined]
+        except Exception:
+            pass
+        # Ensure the log file is closed when the child process exits, to avoid
+        # ResourceWarning: unclosed file warnings from asyncio.
+        try:
+            _waiter = threading.Thread(
+                target=_close_log_when_done,
+                args=(proc, log_f),
+                daemon=True,
+            )
+            _waiter.start()
+        except Exception:
+            pass
         return proc

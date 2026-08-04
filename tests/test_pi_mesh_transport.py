@@ -23,6 +23,7 @@ CREWS = {
     "PLANNER": "pimesh/planning-crew",
     "CODER": "pimesh/coding-crew",
     "REVIEWER": "pimesh/reviewing-crew",
+    "RESEARCHER": "pimesh/planning-crew",
 }
 
 
@@ -257,7 +258,59 @@ def test_coder_one_pass_contract_in_spec():
     assert "`edit`" in md
     assert "TASK_FAILED" in md
     assert "worker_response" in md
-    print("PASS: CODER spec contains ONE-PASS contract rules")
+    print("PASS: CODER spec contains OUTPUT contract rules")
+
+
+def test_prompt_contracts_are_injected_once():
+    """
+    Verify that each role spec contains exactly its own output contract
+    and no legacy duplicated phrases. Each dispatch overwrites the same
+    task file, so we check isolation per role.
+    """
+    root = tempfile.mkdtemp()
+    t = PiMeshTransport(crew_cwds=CREWS, project_root=root)
+
+    roles = [
+        ("PLANNER", CREWS["PLANNER"]),
+        ("RESEARCHER", CREWS["PLANNER"]),  # researcher uses planning-crew dir
+        ("CODER", CREWS["CODER"]),
+        ("REVIEWER", CREWS["REVIEWER"]),
+    ]
+
+    legacy_phrase = "Schreibe SOFORT eine Datei namens `worker_response.{task_id}.response.json`"
+
+    for role, crew_dir in roles:
+        payload = {
+            "event": "TASK_ASSIGNMENT",
+            "run_id": "run-X",
+            "task_id": "task-1",
+            "role": role,
+            "state_revision": 5,
+            "prompt": "make website",
+            "task_definition": {
+                "description": f"{role} task",
+                "expected_artifacts": [{"path": "index.html", "type": "CREATE"}],
+                "acceptance_criteria": ["EXISTS:index.html"],
+            },
+        }
+        asyncio.run(t.dispatch(payload))
+        md = open(os.path.join(root, crew_dir, ".pi", "messenger", "crew", "tasks", "task-1.md"), encoding="utf-8").read()
+
+        # This role's contract appears exactly once
+        assert "Output Contract" in md
+        assert md.count("Output Contract") == 1
+
+        # No other role's contract leaked in
+        for other_role, _ in roles:
+            if other_role == role:
+                continue
+            assert f"OUTPUT CONTRACT ({other_role})" not in md
+
+        # Legacy duplicated phrase removed
+        assert legacy_phrase not in md
+        print(f"PASS: {role} contract injected exactly once, isolated")
+
+    print("PASS: all role contracts are isolated and injected once")
 
 
 if __name__ == "__main__":
@@ -269,4 +322,5 @@ if __name__ == "__main__":
     test_schema_violation_event_roman()
     test_spec_prompt_fixes_1_to_4()
     test_coder_one_pass_contract_in_spec()
+    test_prompt_contracts_are_injected_once()
     print("\nALL TESTS PASSED")

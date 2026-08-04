@@ -152,6 +152,9 @@ class TaskDefinition(BaseModel):
     dependencies: List[str] = Field(default_factory=list)
     expected_artifacts: List[PlannedArtifact]
     acceptance_criteria: List[str]
+    review_checklist: List[str] = Field(default_factory=list)
+    hard_constraints: List[str] = Field(default_factory=list)
+    tech_stack: List[str] = Field(default_factory=list)
     # Phase 2 (Idee A): edit-contract (H1/H2)
     scope_files: List[str] = Field(default_factory=list)        # relative paths the CODER may CREATE/UPDATE
     protected_files: List[str] = Field(default_factory=list)    # relative paths the CODER must NOT touch (any action)
@@ -192,6 +195,9 @@ class TaskDraftSchema(BaseModel):
     dependencies: List[str] = Field(default_factory=list)
     expected_artifacts: List[PlannedArtifact]
     acceptance_criteria: List[str]
+    review_checklist: List[str] = Field(default_factory=list)
+    hard_constraints: List[str] = Field(default_factory=list)
+    tech_stack: List[str] = Field(default_factory=list)
     # Phase 2 (Idee A): edit-contract (carried through the planner draft; the kernel
     # fills protected_files deterministically in ingest mode, see scope_policy.py)
     scope_files: List[str] = Field(default_factory=list)
@@ -305,6 +311,9 @@ class Task(Base):
     dependencies = Column(JSON, default=[]) 
     expected_artifacts = Column(JSON, nullable=False)
     acceptance_criteria = Column(JSON, nullable=False)
+    review_checklist = Column(JSON, nullable=False, default=list)
+    hard_constraints = Column(JSON, nullable=False, default=list)
+    tech_stack = Column(JSON, nullable=False, default=list)
     last_review_feedback = Column(Text, nullable=True)  # Phase 6.1: REVIEW_FAILURE-Feedback fuer CODER-Retries
     retry_count = Column(Integer, default=0)
     max_retries = Column(Integer, default=1)

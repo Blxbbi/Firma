@@ -1,3 +1,4 @@
+from typing import Tuple
 import logging
 import json
 from datetime import datetime, timezone

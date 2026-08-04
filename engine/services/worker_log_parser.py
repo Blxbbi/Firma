@@ -44,10 +44,11 @@ def _parse_token_usage(message: Dict[str, Any]) -> Optional[Dict[str, int]]:
     usage = message.get("usage")
     if not isinstance(usage, dict):
         return None
-    total = usage.get("totalTokens") or usage.get("total_tokens")
-    inp = usage.get("input") or usage.get("input_tokens")
-    out = usage.get("output") or usage.get("output_tokens")
-    cache_read = usage.get("cacheRead") or usage.get("cache_read")
+    # Use explicit key checks because 0 is a valid token count but falsy in Python.
+    total = usage.get("totalTokens") if "totalTokens" in usage else usage.get("total_tokens")
+    inp = usage.get("input") if "input" in usage else usage.get("input_tokens")
+    out = usage.get("output") if "output" in usage else usage.get("output_tokens")
+    cache_read = usage.get("cacheRead") if "cacheRead" in usage else usage.get("cache_read")
     if total is None and inp is None and out is None and cache_read is None:
         return None
     return {

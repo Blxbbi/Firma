@@ -37,7 +37,7 @@ def _make_wrapper(reject_once):
     run_pi_mesh.REVIEWER_DUMMY_REJECT_ONCE = reject_once
     transport = FakeTransport()
     provider = FakeProvider()
-    wrapper, _ = run_pi_mesh.make_pimesh_messenger_callback(
+    wrapper, _spawned, _task_done_events, _task_assigned_at, _task_cooldown = run_pi_mesh.make_pimesh_messenger_callback(
         transport, provider, {"REVIEWER": "pimesh/reviewing-crew"}, "/tmp", {}
     )
     return transport, provider, wrapper

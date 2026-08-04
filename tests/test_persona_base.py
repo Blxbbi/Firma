@@ -149,7 +149,7 @@ def test_persona_base_wiring_seeds_task_session():
         try:
             transport = FakeTransport()
             provider = FakeProvider()
-            cb, _ = run_pi_mesh.make_pimesh_messenger_callback(
+            cb, _spawned, _task_done_events, _task_assigned_at, _task_cooldown = run_pi_mesh.make_pimesh_messenger_callback(
                 transport=transport, provider=provider,
                 crew_cwds={"CODER": "pimesh/coding-crew"},
                 project_root=".", models={"CODER": None},

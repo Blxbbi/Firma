@@ -1,0 +1,202 @@
+{
+  "run_id": "dd05bfd8-8572-4def-bf19-efea8d679384",
+  "app": "counter",
+  "transport": "pimesh",
+  "started_at": "2026-07-25T17:39:24.648904",
+  "terminal_state": "COMPLETED",
+  "task_summary": [
+    {
+      "task_id": "c6a58269-13c3-4994-b883-c588244eb1da",
+      "role": "RESEARCHER",
+      "state": "VERIFIED",
+      "execution_phase": "COMPLETE",
+      "review": null
+    },
+    {
+      "task_id": "4b747ad4-bf5f-47be-a0da-076354b00e4a",
+      "role": "PLANNER",
+      "state": "VERIFIED",
+      "execution_phase": "COMPLETE",
+      "review": null
+    },
+    {
+      "task_id": "task-1",
+      "role": "REVIEWER",
+      "state": "VERIFIED",
+      "execution_phase": "COMPLETE",
+      "review": null
+    },
+    {
+      "task_id": "task-2",
+      "role": "REVIEWER",
+      "state": "VERIFIED",
+      "execution_phase": "COMPLETE",
+      "review": null
+    }
+  ],
+  "artifact_refs": [
+    {
+      "task_id": "research",
+      "path": "C:\\Users\\arthu\\Coding\\Firma\\data\\artifacts\\dd05bfd8-8572-4def-bf19-efea8d679384\\c6a58269-13c3-4994-b883-c588244eb1da\\research\\brief.md",
+      "bytes": 8168
+    },
+    {
+      "task_id": "task-1",
+      "path": "C:\\Users\\arthu\\Coding\\Firma\\data\\artifacts\\dd05bfd8-8572-4def-bf19-efea8d679384\\task-1\\index.html",
+      "bytes": 16064
+    },
+    {
+      "task_id": "task-2",
+      "path": "C:\\Users\\arthu\\Coding\\Firma\\data\\artifacts\\dd05bfd8-8572-4def-bf19-efea8d679384\\task-2\\index.html",
+      "bytes": 18235
+    },
+    {
+      "task_id": "task-2",
+      "path": "C:\\Users\\arthu\\Coding\\Firma\\data\\artifacts\\dd05bfd8-8572-4def-bf19-efea8d679384\\task-2\\style.css",
+      "bytes": 10391
+    }
+  ],
+  "tool_usage_by_task": {
+    "PLANNER:4b747ad4-bf5f-47be-a0da-076354b00e4a": {
+      "read": 4,
+      "write": 4
+    },
+    "RESEARCHER:c6a58269-13c3-4994-b883-c588244eb1da": {
+      "read": 20,
+      "write": 4
+    },
+    "CODER:task-1": {
+      "read": 6,
+      "write": 4
+    },
+    "CODER:task-2": {
+      "read": 10,
+      "write": 6
+    }
+  },
+  "turn_usage_by_task": {
+    "PLANNER:4b747ad4-bf5f-47be-a0da-076354b00e4a": {
+      "task_id": "4b747ad4-bf5f-47be-a0da-076354b00e4a",
+      "turn_count": 5,
+      "tool_calls": {
+        "read": 4,
+        "write": 4
+      },
+      "token_usage": {
+        "total_tokens": 156384,
+        "input_tokens": 28521,
+        "output_tokens": 8823,
+        "cache_read": 119040
+      },
+      "warnings": [
+        "token_usage_aggregated_from_15_events",
+        "phase_timing_unavailable_no_timestamps"
+      ],
+      "phase_timing": null,
+      "error_events": [],
+      "observed_roles": [
+        "PLANNER"
+      ]
+    },
+    "RESEARCHER:c6a58269-13c3-4994-b883-c588244eb1da": {
+      "task_id": "c6a58269-13c3-4994-b883-c588244eb1da",
+      "turn_count": 13,
+      "tool_calls": {
+        "read": 20,
+        "write": 4
+      },
+      "token_usage": {
+        "total_tokens": 804060,
+        "input_tokens": 175007,
+        "output_tokens": 32189,
+        "cache_read": 596864
+      },
+      "warnings": [
+        "token_usage_aggregated_from_41_events",
+        "phase_timing_unavailable_no_timestamps"
+      ],
+      "phase_timing": null,
+      "error_events": [],
+      "observed_roles": [
+        "RESEARCHER"
+      ]
+    },
+    "CODER:task-1": {
+      "task_id": "task-1",
+      "turn_count": 5,
+      "tool_calls": {
+        "read": 6,
+        "write": 4
+      },
+      "token_usage": {
+        "total_tokens": 223329,
+        "input_tokens": 131158,
+        "output_tokens": 29195,
+        "cache_read": 62976
+      },
+      "warnings": [
+        "token_usage_aggregated_from_17_events",
+        "phase_timing_unavailable_no_timestamps"
+      ],
+      "phase_timing": null,
+      "error_events": [],
+      "observed_roles": [
+        "CODER"
+      ]
+    },
+    "CODER:task-2": {
+      "task_id": "task-2",
+      "turn_count": 8,
+      "tool_calls": {
+        "read": 10,
+        "write": 6
+      },
+      "token_usage": {
+        "total_tokens": 385599,
+        "input_tokens": 131007,
+        "output_tokens": 33408,
+        "cache_read": 221184
+      },
+      "warnings": [
+        "token_usage_aggregated_from_23_events",
+        "phase_timing_unavailable_no_timestamps"
+      ],
+      "phase_timing": null,
+      "error_events": [],
+      "observed_roles": [
+        "CODER"
+      ]
+    }
+  },
+  "logs_path": "C:\\Users\\arthu\\Coding\\Firma\\archive\\runs\\dd05bfd8-8572-4def-bf19-efea8d679384\\run.log",
+  "db_snapshot_path": "C:\\Users\\arthu\\Coding\\Firma\\archive\\runs\\dd05bfd8-8572-4def-bf19-efea8d679384\\db_snapshot.json",
+  "config_snapshot": {
+    "project_name": "Firma Project Website (PiMesh)",
+    "FIRMA_TRANSPORT": "pimesh",
+    "FIRMA_APP": "counter"
+  },
+  "archived_at": "2026-07-25T17:44:31.197848+00:00",
+  "baseline_manifest": "baseline_manifest.json",
+  "workspace_root": "C:\\Users\\arthu\\Coding\\Firma\\workspace\\dd05bfd8-8572-4def-bf19-efea8d679384\\project",
+  "scope_summary": {
+    "task-1": {
+      "scope_files": [
+        "index.html"
+      ],
+      "protected_files": [
+        "app.js",
+        "style.css"
+      ]
+    },
+    "task-2": {
+      "scope_files": [
+        "index.html",
+        "style.css"
+      ],
+      "protected_files": [
+        "app.js"
+      ]
+    }
+  },
+  "research_brief": "research_brief.md"
+}

@@ -58,3 +58,37 @@ tools/check_run_tokens_detailed.py
 tools/check_run_tokens_e1c5edbd.py
 tools/check_worker_log_format.py
 tools/update_manifest.py
+
+# Python
+.venv/
+.pytest_cache/
+__pycache__/
+*.pyc
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+Thumbs.db
+
+# One-off / temp scripts
+tmp_*.py
+
+# Test databases at repo root
+test_persistence_*.db
+test_repo_dedup_*.db
+
+# Logs
+*.log
+
+# Backup / pid / windows junk
+*.bak
+*.pid
+nul
+.Trash-*
+
+# Tooling
+.qodo/
+

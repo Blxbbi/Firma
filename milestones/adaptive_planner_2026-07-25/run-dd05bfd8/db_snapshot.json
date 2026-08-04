@@ -1,0 +1,42 @@
+{
+  "run_id": "dd05bfd8-8572-4def-bf19-efea8d679384",
+  "terminal_state": "COMPLETED",
+  "started_at": "2026-07-25T17:39:24.648904",
+  "task_summary": [
+    {
+      "task_id": "c6a58269-13c3-4994-b883-c588244eb1da",
+      "role": "RESEARCHER",
+      "state": "VERIFIED",
+      "execution_phase": "COMPLETE",
+      "review": null
+    },
+    {
+      "task_id": "4b747ad4-bf5f-47be-a0da-076354b00e4a",
+      "role": "PLANNER",
+      "state": "VERIFIED",
+      "execution_phase": "COMPLETE",
+      "review": null
+    },
+    {
+      "task_id": "task-1",
+      "role": "REVIEWER",
+      "state": "VERIFIED",
+      "execution_phase": "COMPLETE",
+      "review": null
+    },
+    {
+      "task_id": "task-2",
+      "role": "REVIEWER",
+      "state": "VERIFIED",
+      "execution_phase": "COMPLETE",
+      "review": null
+    }
+  ],
+  "failure_reason": null,
+  "summary_counters": {
+    "total": 4,
+    "done": 0,
+    "failed": 0,
+    "review_feedback": 0
+  }
+}

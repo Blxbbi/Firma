@@ -105,7 +105,7 @@ def test_spawn_serialization_limits_concurrency():
     provider = StubProvider()
     try:
         transport = FakeTransport()
-        cb, _ = run_pi_mesh.make_pimesh_messenger_callback(
+        cb, _spawned, _task_done_events, _task_assigned_at, _task_cooldown = run_pi_mesh.make_pimesh_messenger_callback(
             transport=transport, provider=provider,
             crew_cwds={"PLANNER": "x", "CODER": "y"}, project_root=".", models={},
         )
@@ -120,7 +120,7 @@ def test_spawn_serialization_allows_n_concurrent():
     provider = StubProvider()
     try:
         transport = FakeTransport()
-        cb, _ = run_pi_mesh.make_pimesh_messenger_callback(
+        cb, _spawned, _task_done_events, _task_assigned_at, _task_cooldown = run_pi_mesh.make_pimesh_messenger_callback(
             transport=transport, provider=provider,
             crew_cwds={"PLANNER": "x", "CODER": "y"}, project_root=".", models={},
         )

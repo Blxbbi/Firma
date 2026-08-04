@@ -1,0 +1,427 @@
+{
+  "run_id": "dd05bfd8-8572-4def-bf19-efea8d679384",
+  "terminal_state": "COMPLETED",
+  "overview": {
+    "run_id": "dd05bfd8-8572-4def-bf19-efea8d679384",
+    "app": "counter",
+    "transport": "pimesh",
+    "terminal_state": "COMPLETED",
+    "started_at": "2026-07-25T17:39:24.648904",
+    "completed_at": "2026-07-25T17:44:28.724497",
+    "duration_seconds": 304.076,
+    "persona_id": null,
+    "session_mode": null
+  },
+  "task_table": [
+    {
+      "task_id": "c6a58269-13c3-4994-b883-c588244eb1da",
+      "role": "RESEARCHER",
+      "terminal_state": "VERIFIED",
+      "attempts": 0,
+      "retries": 0,
+      "last_event": "RESEARCH_COMPLETE",
+      "verifier": "research_readonly"
+    },
+    {
+      "task_id": "4b747ad4-bf5f-47be-a0da-076354b00e4a",
+      "role": "PLANNER",
+      "terminal_state": "VERIFIED",
+      "attempts": 0,
+      "retries": 0,
+      "last_event": "PLAN_SUBMITTED",
+      "verifier": "structural_web"
+    },
+    {
+      "task_id": "task-1",
+      "role": "REVIEWER",
+      "terminal_state": "VERIFIED",
+      "attempts": 0,
+      "retries": 0,
+      "last_event": "REVIEW_APPROVED",
+      "verifier": "n/a"
+    },
+    {
+      "task_id": "task-2",
+      "role": "REVIEWER",
+      "terminal_state": "VERIFIED",
+      "attempts": 0,
+      "retries": 0,
+      "last_event": "CODE_SUBMITTED",
+      "verifier": "n/a"
+    }
+  ],
+  "scope_summary": [
+    {
+      "task_id": "task-1",
+      "scope_files": [
+        "index.html"
+      ],
+      "protected_files": [
+        "app.js",
+        "style.css"
+      ],
+      "recheck": "skipped (verify error)"
+    },
+    {
+      "task_id": "task-2",
+      "scope_files": [
+        "index.html",
+        "style.css"
+      ],
+      "protected_files": [
+        "app.js"
+      ],
+      "recheck": "skipped (verify error)"
+    }
+  ],
+  "research": {
+    "present": true,
+    "link": "research_brief.md",
+    "excerpt": "# Research Brief\n\n## Delta Assessment\nDas Projekt enthält bereits eine vollständige Implementierung der Firma-Website als Plain-HTML/CSS/JS-Seite. Alle im User-Goal geforderten Inhaltsbereiche (Hero, Architektur, Features, Einsatzzweck, Status, Installation, Vertrauen) sind in `index.html` vorhanden. Es gibt keine strukturell fehlenden Dateien; der Delta-Bedarf beschränkt sich auf optionale Polish-Massnahmen.\n\n## Project Findings\n\n### Vorhandene Dateien und Struktur"
+  },
+  "failures": [],
+  "artifacts": {
+    "artifact_refs_count": 4,
+    "artifact_refs": [
+      {
+        "task_id": "research",
+        "path": "C:\\Users\\arthu\\Coding\\Firma\\data\\artifacts\\dd05bfd8-8572-4def-bf19-efea8d679384\\c6a58269-13c3-4994-b883-c588244eb1da\\research\\brief.md",
+        "bytes": 8168
+      },
+      {
+        "task_id": "task-1",
+        "path": "C:\\Users\\arthu\\Coding\\Firma\\data\\artifacts\\dd05bfd8-8572-4def-bf19-efea8d679384\\task-1\\index.html",
+        "bytes": 16064
+      },
+      {
+        "task_id": "task-2",
+        "path": "C:\\Users\\arthu\\Coding\\Firma\\data\\artifacts\\dd05bfd8-8572-4def-bf19-efea8d679384\\task-2\\index.html",
+        "bytes": 18235
+      },
+      {
+        "task_id": "task-2",
+        "path": "C:\\Users\\arthu\\Coding\\Firma\\data\\artifacts\\dd05bfd8-8572-4def-bf19-efea8d679384\\task-2\\style.css",
+        "bytes": 10391
+      }
+    ],
+    "deliverables_dir": "C:\\Users\\arthu\\Coding\\Firma\\archive\\deliverables",
+    "note": "deliverables are not copied into the archive in V1"
+  },
+  "repro_env": {
+    "FIRMA_TRANSPORT": "pimesh",
+    "FIRMA_APP": "counter"
+  },
+  "tool_usage": {
+    "by_task": {
+      "PLANNER:4b747ad4-bf5f-47be-a0da-076354b00e4a": {
+        "read": 4,
+        "write": 4
+      },
+      "RESEARCHER:c6a58269-13c3-4994-b883-c588244eb1da": {
+        "read": 20,
+        "write": 4
+      },
+      "CODER:task-1": {
+        "read": 6,
+        "write": 4
+      },
+      "CODER:task-2": {
+        "read": 10,
+        "write": 6
+      }
+    },
+    "by_role": {
+      "RESEARCHER": {},
+      "PLANNER": {},
+      "REVIEWER": {}
+    }
+  },
+  "tool_policy_checks": [
+    {
+      "task_id": "c6a58269-13c3-4994-b883-c588244eb1da",
+      "role": "RESEARCHER",
+      "tool_usage": {},
+      "policy_violations": [],
+      "ok": true
+    },
+    {
+      "task_id": "4b747ad4-bf5f-47be-a0da-076354b00e4a",
+      "role": "PLANNER",
+      "tool_usage": {},
+      "policy_violations": [],
+      "ok": true
+    },
+    {
+      "task_id": "task-1",
+      "role": "REVIEWER",
+      "tool_usage": {},
+      "policy_violations": [],
+      "ok": true
+    },
+    {
+      "task_id": "task-2",
+      "role": "REVIEWER",
+      "tool_usage": {},
+      "policy_violations": [],
+      "ok": true
+    }
+  ],
+  "turn_usage": {
+    "by_task": {
+      "PLANNER:4b747ad4-bf5f-47be-a0da-076354b00e4a": {
+        "task_id": "4b747ad4-bf5f-47be-a0da-076354b00e4a",
+        "turn_count": 5,
+        "tool_calls": {
+          "read": 4,
+          "write": 4
+        },
+        "token_usage": {
+          "total_tokens": 156384,
+          "input_tokens": 28521,
+          "output_tokens": 8823,
+          "cache_read": 119040
+        },
+        "warnings": [
+          "token_usage_aggregated_from_15_events",
+          "phase_timing_unavailable_no_timestamps"
+        ],
+        "phase_timing": null,
+        "error_events": [],
+        "observed_roles": [
+          "PLANNER"
+        ]
+      },
+      "RESEARCHER:c6a58269-13c3-4994-b883-c588244eb1da": {
+        "task_id": "c6a58269-13c3-4994-b883-c588244eb1da",
+        "turn_count": 13,
+        "tool_calls": {
+          "read": 20,
+          "write": 4
+        },
+        "token_usage": {
+          "total_tokens": 804060,
+          "input_tokens": 175007,
+          "output_tokens": 32189,
+          "cache_read": 596864
+        },
+        "warnings": [
+          "token_usage_aggregated_from_41_events",
+          "phase_timing_unavailable_no_timestamps"
+        ],
+        "phase_timing": null,
+        "error_events": [],
+        "observed_roles": [
+          "RESEARCHER"
+        ]
+      },
+      "CODER:task-1": {
+        "task_id": "task-1",
+        "turn_count": 5,
+        "tool_calls": {
+          "read": 6,
+          "write": 4
+        },
+        "token_usage": {
+          "total_tokens": 223329,
+          "input_tokens": 131158,
+          "output_tokens": 29195,
+          "cache_read": 62976
+        },
+        "warnings": [
+          "token_usage_aggregated_from_17_events",
+          "phase_timing_unavailable_no_timestamps"
+        ],
+        "phase_timing": null,
+        "error_events": [],
+        "observed_roles": [
+          "CODER"
+        ]
+      },
+      "CODER:task-2": {
+        "task_id": "task-2",
+        "turn_count": 8,
+        "tool_calls": {
+          "read": 10,
+          "write": 6
+        },
+        "token_usage": {
+          "total_tokens": 385599,
+          "input_tokens": 131007,
+          "output_tokens": 33408,
+          "cache_read": 221184
+        },
+        "warnings": [
+          "token_usage_aggregated_from_23_events",
+          "phase_timing_unavailable_no_timestamps"
+        ],
+        "phase_timing": null,
+        "error_events": [],
+        "observed_roles": [
+          "CODER"
+        ]
+      }
+    },
+    "by_role": {
+      "PLANNER": {
+        "tasks": 1,
+        "turns": 5,
+        "tool_calls": 8,
+        "warnings": [
+          "token_usage_aggregated_from_15_events",
+          "phase_timing_unavailable_no_timestamps"
+        ]
+      },
+      "RESEARCHER": {
+        "tasks": 1,
+        "turns": 13,
+        "tool_calls": 24,
+        "warnings": [
+          "token_usage_aggregated_from_41_events",
+          "phase_timing_unavailable_no_timestamps"
+        ]
+      },
+      "CODER": {
+        "tasks": 2,
+        "turns": 13,
+        "tool_calls": 26,
+        "warnings": [
+          "token_usage_aggregated_from_17_events",
+          "phase_timing_unavailable_no_timestamps",
+          "token_usage_aggregated_from_23_events"
+        ]
+      }
+    }
+  },
+  "retry_error_details": {
+    "by_task": [
+      {
+        "task_id": "4b747ad4-bf5f-47be-a0da-076354b00e4a",
+        "role": "PLANNER",
+        "state": "VERIFIED",
+        "execution_phase": "COMPLETE",
+        "attempt_count": 0,
+        "retry_count": 0,
+        "last_review_feedback": null,
+        "error_events": [],
+        "phase_timing": null
+      },
+      {
+        "task_id": "c6a58269-13c3-4994-b883-c588244eb1da",
+        "role": "RESEARCHER",
+        "state": "VERIFIED",
+        "execution_phase": "COMPLETE",
+        "attempt_count": 0,
+        "retry_count": 0,
+        "last_review_feedback": null,
+        "error_events": [],
+        "phase_timing": null
+      },
+      {
+        "task_id": "task-1",
+        "role": "CODER",
+        "state": "VERIFIED",
+        "execution_phase": "COMPLETE",
+        "attempt_count": 0,
+        "retry_count": 0,
+        "last_review_feedback": null,
+        "error_events": [],
+        "phase_timing": null
+      },
+      {
+        "task_id": "task-2",
+        "role": "CODER",
+        "state": "VERIFIED",
+        "execution_phase": "COMPLETE",
+        "attempt_count": 0,
+        "retry_count": 0,
+        "last_review_feedback": null,
+        "error_events": [],
+        "phase_timing": null
+      }
+    ]
+  },
+  "phase_timing": {
+    "by_task": {
+      "PLANNER:4b747ad4-bf5f-47be-a0da-076354b00e4a": null,
+      "RESEARCHER:c6a58269-13c3-4994-b883-c588244eb1da": null,
+      "CODER:task-1": null,
+      "CODER:task-2": null
+    },
+    "by_role": {}
+  },
+  "token_usage_report": {
+    "by_task": {
+      "PLANNER:4b747ad4-bf5f-47be-a0da-076354b00e4a": {
+        "total_tokens": 156384,
+        "input_tokens": 28521,
+        "output_tokens": 8823,
+        "cache_read": 119040
+      },
+      "RESEARCHER:c6a58269-13c3-4994-b883-c588244eb1da": {
+        "total_tokens": 804060,
+        "input_tokens": 175007,
+        "output_tokens": 32189,
+        "cache_read": 596864
+      },
+      "CODER:task-1": {
+        "total_tokens": 223329,
+        "input_tokens": 131158,
+        "output_tokens": 29195,
+        "cache_read": 62976
+      },
+      "CODER:task-2": {
+        "total_tokens": 385599,
+        "input_tokens": 131007,
+        "output_tokens": 33408,
+        "cache_read": 221184
+      }
+    },
+    "by_role": {
+      "PLANNER": {
+        "tasks": 1,
+        "total_tokens": 156384,
+        "input_tokens": 28521,
+        "output_tokens": 8823,
+        "cache_read": 119040
+      },
+      "RESEARCHER": {
+        "tasks": 1,
+        "total_tokens": 804060,
+        "input_tokens": 175007,
+        "output_tokens": 32189,
+        "cache_read": 596864
+      },
+      "CODER": {
+        "tasks": 2,
+        "total_tokens": 608928,
+        "input_tokens": 262165,
+        "output_tokens": 62603,
+        "cache_read": 284160
+      }
+    },
+    "unavailable_tasks": [],
+    "note": "Token usage is best-effort. If unavailable, the provider did not report usage in worker.log."
+  },
+  "error_patterns": {
+    "total_errors": 0,
+    "errors_by_type": {},
+    "errors": []
+  },
+  "sections_present": [
+    "overview",
+    "task_table",
+    "scope_summary",
+    "research",
+    "failures",
+    "artifacts",
+    "repro_env",
+    "tool_usage",
+    "tool_policy_checks",
+    "turn_usage",
+    "retry_error_details",
+    "phase_timing",
+    "token_usage_report",
+    "error_patterns"
+  ],
+  "warnings": []
+}

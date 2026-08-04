@@ -72,7 +72,7 @@ class TestSpawnSemaphoreUnit(unittest.TestCase):
         never_ending_proc.wait = lambda: None  # wird eh nicht aufgerufen
 
         with patch("subprocess.Popen", return_value=never_ending_proc):
-            callback, spawned, task_done_events = make_pimesh_messenger_callback(
+            callback, spawned, task_done_events, _task_assigned_at, _task_cooldown = make_pimesh_messenger_callback(
                 transport=transport,
                 provider=provider,
                 crew_cwds={"CODER": "coding-crew"},

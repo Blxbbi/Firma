@@ -43,6 +43,8 @@ class GuardianPipeline:
         - max 10 tasks total (adaptive planning)
         - CODER tasks must have at least 1 expected_artifacts
         - max 3 expected_artifacts per task
+        - file ownership: each path may be CREATEd by at most one CODER task;
+          multiple UPDATEs on the same file are allowed (e.g., multi-step wizard)
         """
         issues: List[str] = []
         tasks = plan_data.get("tasks") or []
@@ -51,6 +53,8 @@ class GuardianPipeline:
         if len(tasks) > 10:
             issues.append(f"Plan has {len(tasks)} tasks (max 10)")
 
+        creators: Dict[str, List[str]] = {}
+        updaters: Dict[str, List[str]] = {}
         for t in tasks:
             role = (t.get("role") or "CODER").upper()
             arts = t.get("expected_artifacts") or []
@@ -63,6 +67,34 @@ class GuardianPipeline:
                 issues.append(
                     f"Task '{t.get('id')}' has {len(arts)} expected_artifacts (max 3); "
                     "split into smaller tasks."
+                )
+            if role == "CODER":
+                for a in arts:
+                    path = (a.get("path") or "").strip()
+                    if not path:
+                        continue
+                    action = (a.get("action") or a.get("type") or "CREATE").upper()
+                    if action == "UPDATE":
+                        updaters.setdefault(path, []).append(t.get("id"))
+                    else:
+                        creators.setdefault(path, []).append(t.get("id"))
+
+        # Check for multiple creators (each file must be created by exactly one task)
+        creator_conflicts = {path: ids for path, ids in creators.items() if len(ids) > 1}
+        if creator_conflicts:
+            for path, ids in creator_conflicts.items():
+                issues.append(
+                    f"File ownership violation: `{path}` is CREATEd by tasks {ids}; "
+                    "each file must be CREATEd by exactly one CODER task."
+                )
+
+        # Check that files being UPDATEd are also CREATEd somewhere
+        orphan_updates = {path: ids for path, ids in updaters.items() if path not in creators}
+        if orphan_updates:
+            for path, ids in orphan_updates.items():
+                issues.append(
+                    f"Update without creation: `{path}` is UPDATEd by tasks {ids} "
+                    "but never CREATEd."
                 )
         return len(issues) == 0, issues
 
@@ -172,6 +204,47 @@ class GuardianPipeline:
             if action in [FileAction.CREATE.value, FileAction.UPDATE.value]:
                 if "content" not in item or not isinstance(item.get("content"), str):
                     return False, "ARTIFACT_ITEM_MISSING_OR_INVALID_CONTENT"
+        return True, None
+
+    def _validate_coder_scope(self, task: Task, response) -> Tuple[bool, Optional[str]]:
+        """
+        Greenfield Scope Enforcement (P1):
+        The CODER may only submit artifacts that are listed in task.expected_artifacts.
+        Out-of-scope artifacts are rejected with VERIFY_FAILURE + OUT_OF_SCOPE_ARTIFACTS.
+        """
+        expected = task.expected_artifacts or []
+        expected_paths = set()
+        for a in expected:
+            if isinstance(a, dict):
+                p = a.get("path") or ""
+            else:
+                p = getattr(a, "path", "") or ""
+            p = p.replace("\\", "/").strip()
+            if p:
+                expected_paths.add(p)
+
+        if not expected_paths:
+            return True, None
+
+        artifacts = response.artifacts or []
+        submitted_paths = set()
+        for item in artifacts:
+            if isinstance(item, dict):
+                path = item.get("path")
+                action = item.get("action")
+            else:
+                path = getattr(item, "path", None)
+                action = getattr(item, "action", None)
+
+            if not isinstance(path, str) or not path or path.startswith("/") or ".." in path:
+                continue
+            norm = path.replace("\\", "/")
+            if action in (FileAction.CREATE.value, FileAction.UPDATE.value):
+                submitted_paths.add(norm)
+
+        out_of_scope = sorted(submitted_paths - expected_paths)
+        if out_of_scope:
+            return False, f"OUT_OF_SCOPE_ARTIFACTS: {', '.join(out_of_scope)} (expected: {', '.join(sorted(expected_paths))})"
         return True, None
 
     async def _evaluate_retry_policy(self, session: AsyncSession, task: Task, event: TaskEvent) -> Tuple[str, ExecutionPhase]:
@@ -354,6 +427,21 @@ class GuardianPipeline:
             except IllegalTransitionError as e:
                 return False, str(e)
 
+            # TASK_FAILED budget enforcement (deterministic, kernel-side)
+            # Ensures that repeated worker failures consume retry budget in EVERY phase
+            # (including RESEARCHING and PLANNING), preventing infinite loops.
+            if response.event == TaskEvent.TASK_FAILED:
+                task.attempt_count += 1
+                if task.attempt_count >= self.MAX_ITERATIONS:
+                    logger.error(
+                        f"[Guardian] Task {task.id} exhausted retry budget ({task.attempt_count}) "
+                        f"via TASK_FAILED in {current_phase}. Marking FAILED_ITERATION_LIMIT."
+                    )
+                    transition_res = TransitionResult(
+                        next_phase=ExecutionPhase.FAILED_ITERATION_LIMIT,
+                        next_role=None
+                    )
+
             # Handle Artifact Contract for Code Submissions
             if response.event == TaskEvent.CODE_SUBMITTED:
                 passed, error_code = self._validate_artifact_contract(response)
@@ -395,6 +483,82 @@ class GuardianPipeline:
                         return True, f"SCHEMA_INVALID_TRANSITIONED: {error_code}"
                     else:
                         return False, "Concurrency conflict during schema failure transition"
+
+            # P1: Greenfield Scope Enforcement — CODER may only submit expected_artifacts.
+            if response.event == TaskEvent.CODE_SUBMITTED:
+                scope_ok, scope_error = self._validate_coder_scope(task, response)
+                if not scope_ok:
+                    logger.warning("[Guardian] Scope violation for %s: %s", task.id, scope_error)
+                    task.attempt_count += 1
+                    if task.attempt_count >= self.MAX_ITERATIONS:
+                        logger.error(
+                            f"[Guardian] Task {task.id} exhausted retry budget ({task.attempt_count}) "
+                            f"via VERIFY_FAILURE (scope) in {current_phase}. Marking FAILED_ITERATION_LIMIT."
+                        )
+                        atomic_success = await msg_repo.transition_task_atomic(
+                            session=session,
+                            project_id=task.plan.project_id,
+                            task_id=task.id,
+                            expected_revision=task.state_revision,
+                            new_state="FAILED",
+                            new_phase=ExecutionPhase.FAILED_ITERATION_LIMIT.value,
+                            new_role=AssignedRole.SYSTEM.value,
+                            triggering_message_id=response.message_id,
+                            run_id=run_id,
+                        )
+                        if atomic_success:
+                            transition_log = TaskTransitionLog(
+                                task_id=task.id,
+                                from_phase=current_phase,
+                                event=TaskEvent.VERIFY_FAILURE.value,
+                                to_phase=ExecutionPhase.FAILED_ITERATION_LIMIT.value,
+                                sender_role=response.sender_role,
+                                previous_revision=task.state_revision,
+                                new_revision=task.state_revision + 1,
+                                message_id=response.message_id,
+                                timestamp=response.timestamp,
+                            )
+                            session.add(transition_log)
+                            await session.execute(
+                                sql_update(Task)
+                                .where(Task.id == task.id)
+                                .values(last_review_feedback=f"OUT_OF_SCOPE_ARTIFACTS: {scope_error}"[:1000])
+                            )
+                            return True, f"VERIFY_FAILURE: {scope_error} (budget exhausted)"
+                        else:
+                            return False, "Concurrency conflict during scope failure transition"
+                    atomic_success = await msg_repo.transition_task_atomic(
+                        session=session,
+                        project_id=task.plan.project_id,
+                        task_id=task.id,
+                        expected_revision=task.state_revision,
+                        new_state="READY",
+                        new_phase=ExecutionPhase.CODING.value,
+                        new_role=AssignedRole.CODER.value,
+                        triggering_message_id=response.message_id,
+                        run_id=run_id,
+                    )
+                    if atomic_success:
+                        transition_log = TaskTransitionLog(
+                            task_id=task.id,
+                            from_phase=current_phase,
+                            event=TaskEvent.VERIFY_FAILURE.value,
+                            to_phase=ExecutionPhase.CODING.value,
+                            sender_role=response.sender_role,
+                            previous_revision=task.state_revision,
+                            new_revision=task.state_revision + 1,
+                            message_id=response.message_id,
+                            timestamp=response.timestamp,
+                        )
+                        session.add(transition_log)
+                        await session.execute(
+                            sql_update(Task)
+                            .where(Task.id == task.id)
+                            .values(last_review_feedback=f"OUT_OF_SCOPE_ARTIFACTS: {scope_error}"[:1000])
+                        )
+                        return True, f"VERIFY_FAILURE: {scope_error}"
+                    else:
+                        return False, "Concurrency conflict during scope failure transition"
 
             # Phase 3 (Idee B): Researcher is read-only. Enforce the artifact-path
             # policy (may only write under research/) as defense-in-depth. The

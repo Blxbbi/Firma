@@ -50,7 +50,7 @@ def _make():
     root = tempfile.mkdtemp()
     transport = FakeTransport()
     provider = FakeProvider()
-    wrapper, spawned, _task_done_events, task_assigned_at = make_pimesh_messenger_callback(
+    wrapper, spawned, _task_done_events, task_assigned_at, _task_cooldown = make_pimesh_messenger_callback(
         transport=transport, provider=provider, crew_cwds=CREWS,
         project_root=root, models={"CODER": "kilo/kilo-auto/free"},
     )

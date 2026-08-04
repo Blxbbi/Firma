@@ -1,0 +1,3 @@
+- If this is a web game, index.html MUST contain a <canvas> tag.
+- game.js MUST contain 'addEventListener' for keyboard input and a game loop (requestAnimationFrame or setInterval).
+- The game MUST be playable: snake moves, food spawns, snake grows, collision ends game.

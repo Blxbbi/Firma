@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from engine.providers.base import BaseLLMProvider
 from engine.models import Message, MessageHeader, MessageType, WorkerResponse, TaskEvent
 from engine.exceptions import WorkerExecutionError
+from engine.prompt_loader import get_prompt_loader
 
 logger = logging.getLogger(__name__)
 audit_logger = logging.getLogger("firma.audit")
@@ -58,6 +59,13 @@ class ResearcherWorker:
         start_time = time.time()
         
         try:
+            if hasattr(self.provider, "set_role_context"):
+                self.provider.set_role_context(
+                    role="RESEARCHER",
+                    task_id=task_id,
+                    task_definition={}
+                )
+            
             # Generate JSON via Provider
             raw_output = await self.provider.generate_json(
                 system_prompt=system_prompt,
@@ -115,41 +123,22 @@ class ResearcherWorker:
             return self._create_error_report(project_id, task_id, run_id, "LLM_INTERNAL_ERROR", str(e))
 
     def _build_system_prompt(self) -> str:
-        return (
-            "You are the Firma Researcher. Your role is to explore the project codebase "
-            "and produce a structured research brief for the Planner.\n\n"
-            "STRICT OUTPUT FORMAT:\n"
-            "Return ONLY a valid JSON object with exactly these fields:\n"
-            "{\n"
-            '  "brief_markdown": "Full markdown brief with findings and recommendations"\n'
-            "}\n\n"
-            "RULES:\n"
-            "1. Be factual. Only report what you actually find in the code.\n"
-            "2. Use citations: file:path, line:number, evidence:exact_text\n"
-            "3. Structure: Project Findings, Recommendations for Planner, Risks/Constraints\n"
-            "4. Do NOT write code. Do NOT modify files. Research only.\n"
-            "5. Keep it concise but complete — the Planner depends on it.\n"
-        )
+        return get_prompt_loader().load('researcher', 'system')
 
     def _build_user_prompt(
         self, user_prompt: str, project_id: str, task_id: str, project_root: Optional[str]
     ) -> str:
-        parts = [
-            f"Project ID: {project_id}",
-            f"Task ID: {task_id}",
-            f"User Goal: {user_prompt}",
-        ]
-        
+        template = get_prompt_loader().load('researcher', 'user_template')
+        project_root_section = ''
         if project_root:
-            parts.append(f"\nProject Root: {project_root}")
-            parts.append(
-                "\nExplore the project files under this root. "
-                "Focus on understanding the existing structure, technologies, and patterns."
-            )
+            project_root_section = f'\nProject Root: {project_root}\nExplore the project files under this root. Focus on understanding the existing structure, technologies, patterns.'
         
-        parts.append("\nProduce a research brief that will help the Planner create an accurate plan.")
-        
-        return "\n".join(parts)
+        return template.format(
+            project_id=project_id,
+            task_id=task_id,
+            user_prompt=user_prompt,
+            project_root_section=project_root_section
+        )
 
     def _dummy_response(self, project_id: str, task_id: str, run_id: Optional[str], user_prompt: str, project_root: Optional[str]) -> Message:
         """Synthetic research brief for testing without LLM.

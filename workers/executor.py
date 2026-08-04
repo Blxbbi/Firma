@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, ValidationError
 from engine.providers.base import BaseLLMProvider
 from engine.models import Message, MessageHeader, MessageType, WorkerResponse
 from engine.exceptions import WorkerExecutionError
+from engine.prompt_loader import get_prompt_loader
 
 logger = logging.getLogger(__name__)
 audit_logger = logging.getLogger("firma.audit")
@@ -227,49 +228,24 @@ class ExecutionWorker:
                 }
             )
         
-        system_prompt = (
-            "You are the Firma Execution Worker. Your role is to implement a SPECIFIC TASK that is part of a LARGER PROJECT.\n\n"
-            "STRICT OUTPUT CONTRACT:\n"
-            "You MUST return a JSON object. The 'artifacts' field MUST be a dictionary containing a 'files' list.\n"
-            "Each file object MUST contain: 'path', 'action' (CREATE, UPDATE, or DELETE), and 'content'.\n\n"
-            "CRITICAL LANGUAGE RULE: Follow the project's language requirements strictly. "
-            "If the project is a Web App (HTML/CSS/JS), DO NOT produce Python code, requirements.txt, or any other file types unless explicitly requested.\n\n"
-            "ANTI-LAZINESS DIRECTIVE:\n"
-            "- DO NOT return empty templates, placeholders (e.g. '// Add your code here'), or skeleton files.\n"
-            "- The code MUST be fully functional and implement the complete logic required by the task.\n"
-            "- A non-working or stub implementation will be REJECTED by the verifier.\n\n"
-            "Example Format (Web App):\n"
-            "{\n"
-            "  \"artifacts\": {\n"
-            "    \"files\": [\n"
-            "      {\"path\": \"index.html\", \"action\": \"CREATE\", \"content\": \"<canvas id='game'></canvas>\"},\n"
-            "      {\"path\": \"style.css\", \"action\": \"CREATE\", \"content\": \"body { margin: 0; }\"},\n"
-            "      {\"path\": \"game.js\", \"action\": \"CREATE\", \"content\": \"const canvas = document.getElementById('game');\"}\n"
-            "    ]\n"
-            "  }\n"
-            "}\n\n"
-            "Do not include any explanations, markdown, or extra keys. Return ONLY the JSON."
-        )
+        system_prompt = get_prompt_loader().load("executor", "system")
 
         
         # Merge Global Project Goal with Specific Subtask Context
         task_desc = task_definition.get('description', 'N/A') if isinstance(task_definition, dict) else str(task_definition)
         task_crit = task_definition.get('acceptance_criteria', []) if isinstance(task_definition, dict) else []
         
-        user_prompt = (
-            f"=== GLOBAL PROJECT GOAL ===\n"
-            f"{global_goal if global_goal else 'Implement the requested software project.'}\n\n"
-            f"=== YOUR SPECIFIC SUBTASK (Part of the project above) ===\n"
-            f"Task Description: {task_desc}\n"
-            f"Acceptance Criteria: {task_crit}\n\n"
-            "=== VERIFIER EXPECTATIONS (Your output will be rejected if these fail) ===\n"
-            "- If this is a web game, index.html MUST contain a <canvas> tag.\n"
-            "- game.js MUST contain 'addEventListener' for keyboard input and a game loop (requestAnimationFrame or setInterval).\n"
-            "- The game MUST be playable: snake moves, food spawns, snake grows, collision ends game.\n\n"
-            "=== YOUR ACTION ===\n"
-            "Implement the required artifacts strictly following the acceptance criteria. "
-            "Ensure each file has a clear 'action' (CREATE/UPDATE/DELETE). "
-            "Write COMPLETE, WORKING code. No placeholders."
+        # Merge Global Project Goal with Specific Subtask Context
+        task_desc = task_definition.get('description', 'N/A') if isinstance(task_definition, dict) else str(task_definition)
+        task_crit = task_definition.get('acceptance_criteria', []) if isinstance(task_definition, dict) else []
+        
+        user_prompt_template = get_prompt_loader().load('executor', 'user_template')
+        verifier_expectations = get_prompt_loader().load('executor', 'verifier_expectations')
+        user_prompt = user_prompt_template.format(
+            global_goal=global_goal if global_goal else 'Implement the requested software project.',
+            task_desc=task_desc,
+            task_crit=task_crit,
+            verifier_expectations=verifier_expectations
         )
         
         # Use the ExecutorLLMOutput schema for structural determinism
@@ -278,6 +254,13 @@ class ExecutionWorker:
         logger.info(f"[Worker] ABOUT TO CALL PROVIDER: task={task_id} model={self.model_name}")
         start_time = time.time()
         try:
+            if hasattr(self.provider, "set_role_context"):
+                self.provider.set_role_context(
+                    role="EXECUTOR",
+                    task_id=task_id,
+                    task_definition=task_definition if isinstance(task_definition, dict) else {}
+                )
+            
             # 1. Generate JSON via Provider
             raw_output = await self.provider.generate_json(
                 system_prompt=system_prompt,

@@ -26,6 +26,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from engine.settings import (
     BASE_DIR, DB_DIR, ARTIFACT_DIR, FIRMA_TRANSPORT, PIMESH_CREWS, PIMESH_MODELS, REVIEWER_IS_DUMMY,
     FIRMA_MODE, SESSION_DIR, REVIEWER_DUMMY_REJECT_ONCE, SESSION_MODE, MAX_SESSION_DISK_MB_PER_RUN, PERSONA_ID, MAX_CONCURRENT_SPAWNS,
+    INGEST_PROJECT_DIR,
 )
 from engine.transport.pi_mesh_transport import PiMeshTransport, WORKER_RESPONSE_SUFFIX
 from engine.providers.pi_provider import PiProvider
@@ -124,6 +125,19 @@ class PiMeshReceiverLoop:
     def _tasks_dir(self, crew_cwd: str) -> str:
         return os.path.join(crew_cwd, ".pi", "messenger", "crew", "tasks")
 
+    def _worker_dirs(self, crew_cwd: str) -> List[str]:
+        """Return candidate worker directories in priority order.
+
+        Primary: `<crew-cwd>/.pi/messenger/crew/`
+        Fallback: `<crew-cwd>/pi/messenger/crew/` (worker typo/legacy path)
+        """
+        primary = os.path.join(crew_cwd, ".pi", "messenger", "crew")
+        fallback = os.path.join(crew_cwd, "pi", "messenger", "crew")
+        dirs = [primary]
+        if fallback != primary and os.path.isdir(fallback):
+            dirs.append(fallback)
+        return dirs
+
     def _worker_dir(self, crew_cwd: str) -> str:
         """Das Verzeichnis, in dem der Worker artefakte + response schreibt
         (neben `tasks/`; der Worker arbeitet natuerlich von hier)."""
@@ -149,7 +163,12 @@ class PiMeshReceiverLoop:
                 continue
             action = art.get("action")
             if action in ("CREATE", "UPDATE"):
-                fp = self._safe_path(self._worker_dir(crew_cwd), art.get("path", ""))
+                # Artefakt-Pfade können relativ zu crew_cwd ODER worker_dir (`.pi/messenger/crew/`)
+                # geschrieben werden. Prüfe beide Orte, um Race-Conditions zwischen
+                # RESEARCHER/PLANNER (crew_cwd) und CODER (worker_dir) zu vermeiden.
+                fp = self._safe_path(crew_cwd, art.get("path", ""))
+                if fp is None or not os.path.isfile(fp):
+                    fp = self._safe_path(self._worker_dir(crew_cwd), art.get("path", ""))
                 if fp is None:
                     unsafe = True
                     art["content"] = None
@@ -241,13 +260,16 @@ class PiMeshReceiverLoop:
                 candidate = os.path.join(ARTIFACT_DIR, run_id, task_id, p)
                 if os.path.isfile(candidate):
                     continue  # vorhanden -> nicht pending
-            # 2. Worker-Dir (Fallback)
-            safe = self._safe_path(worker_dir, p)
-            if safe is None:
-                # Unsicherer Pfad -> vom _inline_content behandelt, nicht defer-en.
-                continue
-            if not os.path.isfile(safe):
-                return True
+            # 2. Crew-cwd (RESEARCHER/PLANNER-Artefakte)
+            safe_crew = self._safe_path(crew_cwd, p)
+            if safe_crew is not None and os.path.isfile(safe_crew):
+                continue  # vorhanden -> nicht pending
+            # 3. Worker-Dir (Fallback für Artefakte, die relativ zu `.pi/messenger/crew/` geschrieben werden)
+            safe_worker = self._safe_path(worker_dir, p)
+            if safe_worker is not None and os.path.isfile(safe_worker):
+                continue  # vorhanden -> nicht pending
+            # Weder in ARTIFACT_DIR noch in Crew-cwd noch in Worker-Dir gefunden -> pending
+            return True
         return False
 
     # ------------------------------------------------------------------ guards
@@ -350,6 +372,84 @@ class PiMeshReceiverLoop:
             "artifacts": None,
             "plan_draft": None,
         }
+
+    def _detect_rate_limit_failure(self, crew_cwd: str, task_id: str) -> Optional[Dict[str, Any]]:
+        """Prüft worker.log auf 429/Rate-Limit-Fehler.
+
+        Gibt einen synthetischen TASK_FAILED-Payload zurück, wenn der Worker
+        anhaltend mit 429 gescheitert ist. Sonst None.
+        """
+        base_work = os.path.join(crew_cwd, '.pi', 'work')
+        if not os.path.isdir(base_work):
+            return None
+
+        # Suche worker.log für diese task_id (kann unter .pi/work/<run_id>/<task_id>/ liegen).
+        log_path = None
+        for entry in os.listdir(base_work):
+            candidate = os.path.join(base_work, entry, task_id, 'worker.log')
+            if os.path.isfile(candidate):
+                log_path = candidate
+                break
+
+        if not log_path:
+            return None
+
+        try:
+            events = []
+            with open(log_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        events.append(json.loads(line))
+                    except Exception:
+                        continue
+
+            rate_limit_429 = 0
+            auto_retry_failed = False
+            for event in events:
+                msg = event.get("message") or {}
+                err = msg.get("errorMessage")
+                if err and "429" in str(err):
+                    rate_limit_429 += 1
+                if event.get("type") == "auto_retry_end" and event.get("success") is False:
+                    final = event.get("finalError") or ""
+                    if "429" in str(final):
+                        auto_retry_failed = True
+
+            if auto_retry_failed or rate_limit_429 >= 2:
+                return {
+                    "protocol_version": "1.0",
+                    "message_id": f"{task_id}-rate-limit-{uuid.uuid4().hex}",
+                    "task_id": task_id,
+                    "run_id": None,
+                    "state_revision": 0,
+                    "event": "TASK_FAILED",
+                    "sender_role": "SYSTEM",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "logs": (
+                        f"RATE_LIMITED: worker.log enthaelt {rate_limit_429}x 429 "
+                        f"und auto_retry_end={auto_retry_failed}."
+                    ),
+                    "artifacts": None,
+                    "plan_draft": None,
+                }
+            # S1.5 Backoff/Cooldown: setze Cooldown fuer diesen Task nach 429-Erkennung
+            # Key matches spawn_key = (task_id, state_revision, role)
+            cooldown_key = (task_id, synthetic.get("state_revision"), role)
+            # Exponential backoff: 30s, 60s, 120s, cap 10min
+            attempt = len([k for k in rate_limit_failures if k[0] == task_id]) + 1
+            backoff_s = min(30 * (2 ** (attempt - 1)), 600)
+            task_cooldown[cooldown_key] = time.time() + backoff_s
+            logger.warning(
+                "[S1.5] Rate-limit cooldown for %s: %.0fs (attempt %d)",
+                task_id, backoff_s, attempt,
+            )
+        except Exception as exc:
+            logger.debug("[Receiver] rate-limit scan failed for %s: %s", task_id, exc)
+
+        return None
 
     def _recover_researcher_response(self, crew_cwd: str) -> None:
         """Fallback: wenn der RESEARCHER `research/brief.md` geschrieben hat,
@@ -497,112 +597,149 @@ class PiMeshReceiverLoop:
         Schritt; Firma braucht keinen task.done-Call (PiProvider-Spawn, kein Mesh).
         """
         out: List[Dict[str, Any]] = []
+        rate_limit_failures: Dict[str, Dict[str, Any]] = {}
+
+        # 1) Rate-Limit-Scan: prüfe ALLE Tasks unter .pi/work/ auf 429/Rate-Limit-Fehler,
+        #    unabhängig davon, ob eine worker_response existiert.
         for role in self.crew_cwds:
             crew_cwd = self._crew_cwd(role)
-            worker_dir = self._worker_dir(crew_cwd)
-            if not os.path.isdir(worker_dir):
+            base_work = os.path.join(crew_cwd, '.pi', 'work')
+            if not os.path.isdir(base_work):
                 continue
-            for fn in os.listdir(worker_dir):
-                if not fn.startswith("worker_response.") or not fn.endswith(WORKER_RESPONSE_SUFFIX):
+            for run_entry in os.listdir(base_work):
+                run_dir = os.path.join(base_work, run_entry)
+                if not os.path.isdir(run_dir):
                     continue
-                # Dateiname: worker_response.<task_id>.response.json
-                task_id = fn[len("worker_response."):-len(WORKER_RESPONSE_SUFFIX)]
-                if not task_id:
-                    continue
+                for task_id in os.listdir(run_dir):
+                    task_dir = os.path.join(run_dir, task_id)
+                    if not os.path.isdir(task_dir):
+                        continue
+                    # Skip: Task hat bereits eine worker_response -> normale Verarbeitung.
+                    worker_dir = self._worker_dir(crew_cwd)
+                    resp_fn = f'worker_response.{task_id}{WORKER_RESPONSE_SUFFIX}'
+                    if os.path.isdir(worker_dir) and resp_fn in os.listdir(worker_dir):
+                        continue
 
-                resp_path = os.path.join(worker_dir, fn)
-                try:
-                    with open(resp_path, "r", encoding="utf-8") as f:
-                        raw_text = f.read()
+                    synthetic = self._detect_rate_limit_failure(crew_cwd, task_id)
+                    if synthetic is None:
+                        continue
+
+                    key = (self.expected_run_id, task_id, synthetic.get("state_revision"))
+                    if key in self._consumed:
+                        continue
+
+                    self._consumed.add(key)
+                    logger.warning(
+                        "[Receiver] Rate-limit failure detected for %s (%s); publishing TASK_FAILED",
+                        task_id,
+                        role,
+                    )
+                    out.append({
+                        "role": synthetic.get("sender_role", "SYSTEM"),
+                        "payload": synthetic,
+                        "correlation_id": task_id,
+                    })
+                    rate_limit_failures[task_id] = synthetic
+
+        # 2) Normaler Scan: worker_response-Dateien verarbeiten.
+        #    Tasks, die bereits als RATE_LIMITED markiert wurden, werden übersprungen.
+        for role in self.crew_cwds:
+            crew_cwd = self._crew_cwd(role)
+            scanned_dirs: set = set()
+            for worker_dir in self._worker_dirs(crew_cwd):
+                if worker_dir in scanned_dirs:
+                    continue
+                scanned_dirs.add(worker_dir)
+                if not os.path.isdir(worker_dir):
+                    continue
+                for fn in os.listdir(worker_dir):
+                    if not fn.startswith("worker_response.") or not fn.endswith(WORKER_RESPONSE_SUFFIX):
+                        continue
+                    # Dateiname: worker_response.<task_id>.response.json
+                    task_id = fn[len("worker_response."):-len(WORKER_RESPONSE_SUFFIX)]
+                    if not task_id:
+                        continue
+
+                    # Skip: Task wurde bereits als RATE_LIMITED markiert.
+                    if task_id in rate_limit_failures:
+                        continue
+
+                    resp_path = os.path.join(worker_dir, fn)
+                    try:
+                        with open(resp_path, "r", encoding="utf-8") as f:
+                            raw_text = f.read()
+                    except Exception as e:
+                        logger.warning(f"[Receiver] Cannot read {resp_path}: {e}")
+                        continue
+
                     try:
                         raw = json.loads(raw_text)
                     except json.JSONDecodeError:
-                        # Defensive: doppelt-escaped JSON ({\\n  \\"key\": ...) reparieren.
                         repaired = _try_unescape_json(raw_text)
                         if repaired is None:
                             logger.debug(f"[Receiver] partial/invalid JSON {resp_path}; retry later")
                             continue
                         raw = repaired
                         logger.warning(f"[Receiver] Recovered double-escaped JSON for {task_id}")
-                except Exception as e:
-                    logger.warning(f"[Receiver] Cannot read {resp_path}: {e}")
-                    continue
 
-                wp = raw.get("payload", raw) if isinstance(raw, dict) else raw
-                run_id = wp.get("run_id") if isinstance(wp, dict) else None
-                state_revision = wp.get("state_revision") if isinstance(wp, dict) else None
-                # P3 fix: stale cross-run responses (gleiche task_id, andere run_id)
-                # duerfen diesen Run NICHT vergiften. Vorgaenger-Runs lassen alte
-                # worker_response-Dateien im crew-cwd zurueck; ohne run_id-Check
-                # wuerde die echte Antwort als Duplikat (selber key) dropped.
-                if self.expected_run_id is not None and run_id is not None and run_id != self.expected_run_id:
-                    logger.debug(
-                        "[Receiver] skip stale response for other run (got=%s, expected=%s): %s",
-                        run_id, self.expected_run_id, resp_path,
-                    )
-                    continue
-                key = (run_id, task_id, state_revision)
-                if key in self._consumed:
-                    continue
-
-                # Defer: referenzierte Artefakt-Dateien noch nicht auf Disk?
-                # (Worker schreibt die Response-Datei mehrfach um -> Race vermeiden)
-                if self._response_artifacts_pending(crew_cwd, wp):
-                    logger.debug(f"[Receiver] Defer {task_id} (rev {state_revision}): artifacts not on disk yet")
-                    continue
-
-                # Defer: Planner may emit plan_draft as a side-file (plan_draft.<task_id>.json
-                # or plan_draft.json) that is not on disk yet when the response is scanned (race).
-                # Recover it deterministically below; if the side-file is missing, defer and re-scan.
-                if wp.get("event") == TaskEvent.PLAN_SUBMITTED.value and not wp.get("plan_draft"):
-                    worker_dir_for_plan = self._worker_dir(crew_cwd)
-                    has_plan_draft = (
-                        os.path.isfile(os.path.join(worker_dir_for_plan, f"plan_draft.{task_id}.json"))
-                        or os.path.isfile(os.path.join(worker_dir_for_plan, "plan_draft.json"))
-                    )
-                    if not has_plan_draft:
-                        logger.debug(f"[Receiver] Defer {task_id}: plan_draft side-file not on disk yet")
+                    wp = raw.get("payload", raw) if isinstance(raw, dict) else raw
+                    run_id = wp.get("run_id") if isinstance(wp, dict) else None
+                    state_revision = wp.get("state_revision") if isinstance(wp, dict) else None
+                    if self.expected_run_id is not None and run_id is not None and run_id != self.expected_run_id:
+                        logger.debug(
+                            "[Receiver] skip stale response for other run (got=%s, expected=%s): %s",
+                            run_id, self.expected_run_id, resp_path,
+                        )
+                        continue
+                    key = (run_id, task_id, state_revision)
+                    if key in self._consumed:
                         continue
 
-                worker_payload = wp
-                worker_payload, unsafe = self._inline_content(crew_cwd, worker_payload)
-                # Phase: recover plan_draft from side-file (plan_draft.<task_id>.json) if
-                # the worker omitted it from the response field (common LLM behavior).
-                self._inline_plan_draft(crew_cwd, task_id, worker_payload)
+                    if self._response_artifacts_pending(crew_cwd, wp):
+                        logger.debug(f"[Receiver] Defer {task_id} (rev {state_revision}): artifacts not on disk yet")
+                        continue
 
-                # Repair known worker bug: literal shell placeholder in `timestamp`.
-                worker_payload = _repair_worker_response_timestamp(worker_payload)
+                    if wp.get("event") == TaskEvent.PLAN_SUBMITTED.value and not wp.get("plan_draft"):
+                        worker_dir_for_plan = self._worker_dir(crew_cwd)
+                        has_plan_draft = (
+                            os.path.isfile(os.path.join(worker_dir_for_plan, f"plan_draft.{task_id}.json"))
+                            or os.path.isfile(os.path.join(worker_dir_for_plan, "plan_draft.json"))
+                        )
+                        if not has_plan_draft:
+                            logger.debug(f"[Receiver] Defer {task_id}: plan_draft side-file not on disk yet")
+                            continue
 
-                if unsafe:
-                    validated = self._schema_fail(raw, "artifact path escapes crew cwd (absolute or '..')")
-                    logger.warning(f"[Receiver] Security Boundary: rejected {task_id} (unsafe artifact path)")
+                    worker_payload = wp
+                    worker_payload, unsafe = self._inline_content(crew_cwd, worker_payload)
+                    self._inline_plan_draft(crew_cwd, task_id, worker_payload)
+                    worker_payload = _repair_worker_response_timestamp(worker_payload)
+
+                    if unsafe:
+                        validated = self._schema_fail(raw, "artifact path escapes crew cwd (absolute or '..')")
+                        logger.warning(f"[Receiver] Security Boundary: rejected {task_id} (unsafe artifact path)")
+                        self._consumed.add(key)
+                        validated["message_id"] = f"{task_id}-{uuid.uuid4().hex}"
+                        out.append({
+                            "role": validated.get("sender_role", "SYSTEM"),
+                            "payload": validated,
+                            "correlation_id": task_id,
+                        })
+                        continue
+
+                    try:
+                        validated = WorkerResponse.model_validate(worker_payload).model_dump()
+                    except Exception as e:
+                        validated = self._schema_fail(raw, str(e))
+                        logger.warning(f"[Receiver] Schema violation for {task_id}: {e}")
+
                     self._consumed.add(key)
-                    # Kernel-generierte, eindeutige message_id (Idempotency-Key).
-                    # Der Worker liefert NICHT verlaesslich eine unique id (Placeholder-Kopie!)
                     validated["message_id"] = f"{task_id}-{uuid.uuid4().hex}"
                     out.append({
                         "role": validated.get("sender_role", "SYSTEM"),
                         "payload": validated,
                         "correlation_id": task_id,
                     })
-                    continue
-
-                try:
-                    validated = WorkerResponse.model_validate(worker_payload).model_dump()
-                except Exception as e:
-                    validated = self._schema_fail(raw, str(e))
-                    logger.warning(f"[Receiver] Schema violation for {task_id}: {e}")
-
-                self._consumed.add(key)
-                # Kernel-generierte, eindeutige message_id (Idempotency-Key).
-                # Verhindert UNIQUE-Constraint-Crash bei Worker-Placeholder-IDs.
-                validated["message_id"] = f"{task_id}-{uuid.uuid4().hex}"
-                out.append({
-                    "role": validated.get("sender_role", "SYSTEM"),
-                    "payload": validated,
-                    "correlation_id": task_id,
-                })
-                logger.info(f"[Receiver] Prepared WorkerResponse for {task_id} (event={validated.get('event')})")
+                    logger.info(f"[Receiver] Prepared WorkerResponse for {task_id} (event={validated.get('event')})")
         # Fallback: RESEARCHER hat brief.md geschrieben, aber keine worker_response
         for role in self.crew_cwds:
             crew_cwd = self._crew_cwd(role)
@@ -784,8 +921,9 @@ def make_pimesh_messenger_callback(transport, provider, crew_cwds, project_root,
     active_spawns = {}
     task_done_events: Dict[tuple, asyncio.Event] = {}
     task_assigned_at: Dict[tuple, Tuple[str, float]] = {}
+    task_cooldown: Dict[tuple, float] = {}
 
-    async def _spawn_limited(role, payload, crew_cwd, model, session_id, session_dir, correction_note, spawn_key, task_assigned_at):
+    async def _spawn_limited(role, payload, crew_cwd, model, session_id, session_dir, correction_note, spawn_key, task_assigned_at, task_cooldown):
         task_id = payload.get('task_id')
         state_revision = payload.get('state_revision')
         if task_id is not None:
@@ -988,11 +1126,20 @@ def make_pimesh_messenger_callback(transport, provider, crew_cwds, project_root,
                     session_id = SessionRegistry.session_id_for(payload['run_id'], payload['task_id'], role)
                     session_dir = str(SessionRegistry.session_dir_for(payload['run_id']))
         spawn_key = (payload.get('task_id'), payload.get('state_revision'), role)
+        now = time.time()
+        # S1.5 Backoff/Cooldown: ueberspringe Spawn, wenn Cooldown noch aktiv ist
+        cooldown_until = task_cooldown.get(spawn_key)
+        if cooldown_until and now < cooldown_until:
+            logger.info(
+                '[S1.5] Skip spawn for %s (cooldown active for %.0fs)',
+                payload.get('task_id'), cooldown_until - now,
+            )
+            return
         asyncio.create_task(
-            _spawn_limited(role, payload, crew_cwd, model, session_id, session_dir, correction_note, spawn_key, task_assigned_at)
+            _spawn_limited(role, payload, crew_cwd, model, session_id, session_dir, correction_note, spawn_key, task_assigned_at, task_cooldown)
         )
 
-    return wrapper, spawned, task_done_events, task_assigned_at
+    return wrapper, spawned, task_done_events, task_assigned_at, task_cooldown
 
 
 # ---------------------------------------------------------------------------
@@ -1010,7 +1157,7 @@ async def main_logic():
     VerificationRegistry = _verification_registry()
     VerificationRegistry.register("structural_web", _web_verifier())
 
-    db_path = DB_DIR / "snake_pimesh.db"
+    db_path = DB_DIR / "snake_pimesh_test.db"
     if db_path.exists():
         import time
         for attempt in range(5):
@@ -1047,6 +1194,23 @@ async def main_logic():
     logger.info("🚀 Starting PiMesh Snake Run...")
     run_id = await controller.create_run(config)
 
+    # Phase 2 (Idee A): if FIRMA_PROJECT_DIR is set, auto-setup ingest mode
+    # so scope verification + per-task baselines work out of the box for
+    # PiMesh runs as well (not only in-process runs).
+    logger.info("[PiMesh] Checking ingest setup: FIRMA_PROJECT_DIR=%r", INGEST_PROJECT_DIR)
+    try:
+        from engine.services.ingest import setup_ingest_run
+        manifest = setup_ingest_run(run_id)
+        if manifest is not None:
+            logger.info(
+                "[PiMesh] Ingest mode enabled for run %s (src=%s, files=%d)",
+                run_id, INGEST_PROJECT_DIR, len(manifest),
+            )
+        else:
+            logger.info("[PiMesh] Ingest setup returned None for run %s", run_id)
+    except Exception as exc:
+        logger.warning("[PiMesh] Ingest setup failed for run %s: %s", run_id, exc)
+
     run_archiver = RunArchiver()
     run_archiver.attach_run_log_handler(run_id)
 
@@ -1057,7 +1221,7 @@ async def main_logic():
     # -> dispatch + PiProvider-Spawn). Ohne messenger_callback wuerde nur dispatchen,
     # aber KEINE pi-Worker starten -> PLANNER-TIMEOUT.
     provider = PiProvider()
-    pimesh_callback, _spawned, task_done_events, task_assigned_at = make_pimesh_messenger_callback(
+    pimesh_callback, _spawned, task_done_events, task_assigned_at, _task_cooldown = make_pimesh_messenger_callback(
         transport=shared_transport,
         provider=provider,
         crew_cwds=PIMESH_CREWS,
@@ -1197,56 +1361,24 @@ def _web_verifier():
 
 
 def _snake_config() -> Dict[str, Any]:
-    prompt = (
-        "Erstelle eine professionelle, moderne Website für das Open-Source-Projekt \"Firma\".\n\n"
-        "Firma ist ein deterministisches Multi-Agenten-Execution-Framework für Softwareprojekte. "
-        "Es orchestriert autonome KI-Worker (Researcher, Planner, Coder, Reviewer) über ein strukturiertes Task-System "
-        "mit strengen Zustandsmaschinen, zustandslosen Workern, Artefakt-Pipelines und reproduzierbaren Runs.\n\n"
-        "Die Website soll den Eindruck eines durchdachten, technisch anspruchsvollen Open-Source-Projekts vermitteln, "
-        "nicht den einer Hobby-Bastelbude. Sie soll schick, vertrauenswürdig und informativ sein und einen klaren roten Faden haben.\n\n"
-        "Bitte liefere eine vollständige, produktionsreife Website mit mindestens folgenden Inhalten:\n"
-        "- Hero-Bereich mit klarer Projektpositionierung\n"
-        "- Architektur/Workflow-Uebersicht (Researcher, Planner, Coder, Reviewer, Guardian, Orchestrator)\n"
-        "- Features/Staerken (Determinismus, Reproduzierbarkeit, Read-only-Worker, Artefakt-Tracking, Auditing)\n"
-        "- Einsatzzweck/Nutzen\n"
-        "- Projektstatus/Reife (Meilensteine, lauffaehige Pipeline)\n"
-        "- Installations-/Startabschnitt\n"
-        "- Vertrauenselemente (Governance, nachvollziehbare Runs)\n\n"
-        "Gestalterisch soll die Seite professionell und modern wirken: klare visuelle Hierarchie, gute Typografie, "
-        "ruhige Tiefe, kein ueberladener Slider-Kram. Sie soll auf Mobilgeraeten und Desktop gleichermassen funktionieren.\n\n"
-        "Technische Rahmenbedingungen:\n"
-        "- Plain HTML/CSS/JS, keine Build-Tools, keine externen Frameworks\n"
-        "- Es muessen genau diese Dateien entstehen: index.html, style.css, app.js\n"
-        "- Die Seite muss durch Oeffnen von index.html im Browser funktionsfaehig bleiben\n"
-        "- Barrierefreiheit und Ladezeit beachten\n\n"
-        "Return ONLY the JSON object."
-    )
-    extra = os.environ.get("FIRMA_PLANNER_EXTRA_INSTRUCTION")
-    if extra:
-        prompt += "\n\n" + extra
+    prompt = os.environ.get("FIRMA_USER_PROMPT") or """
+Baue eine minimalen SaaS-Onboarding-Wizard als lokale HTML/JS/CSS-Anwendung.
+"""
     return {
         "project_name": "Firma Project Website (PiMesh)",
         "plan_name": "Professional Firma Website",
         "prompt": prompt,
-        "expected_artifacts": ["index.html", "style.css", "app.js"],
-        "acceptance_criteria": [
-            "EXISTS:index.html",
-            "EXISTS:style.css",
-            "EXISTS:app.js",
-            "CONTAINS:index.html:Firma",
-            "CONTAINS:index.html:Architektur",
-            "CONTAINS:style.css:root",
-            "CONTAINS:app.js:addEventListener",
-        ],
+        "expected_artifacts": [],  # Planner entscheidet selbst
+        "acceptance_criteria": [],  # Planner definiert selbst
         "verification_type": "structural_web",
     }
 
 
 async def main():
     try:
-        await asyncio.wait_for(main_logic(), timeout=1200)
+        await asyncio.wait_for(main_logic(), timeout=3600)
     except asyncio.TimeoutError:
-        logger.error("❌ Run timed out after 1200 seconds.")
+        logger.error("❌ Run timed out after 3600 seconds.")
     except Exception as e:
         logger.exception(f"Critical error during run: {e}")
 

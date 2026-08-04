@@ -77,11 +77,18 @@ class ExecutionService:
             success, logs = await verifier.verify(session, task_id, project_id, plan_version, files)
             logger.info(f"[ExecutionService] Verification result: success={success}, reason='{logs}'")
 
+            # Phase 7 (Reviewer-Upgrade): deterministic constraint guard.
+            # Runs for every task (not just ingest mode) because constraints are universal.
+            constraint_ok, constraint_logs = await self._constraint_check(files)
+            if not constraint_ok:
+                logger.info("[ExecutionService] Constraint verification FAILED: %s", constraint_logs)
+                return TaskEvent.VERIFY_FAILURE, constraint_logs
+
             # Phase 2 (Idee A) Step3.3: deterministic scope/protected guard.
             # Runs only in ingest mode (no ingest context -> adapter is a pass-through).
             scope_ok, scope_logs = await self._scope_check(session, task_id, project_id, plan_version, files)
             if not scope_ok:
-                logger.info(f"[ExecutionService] Scope verification FAILED: {scope_logs}")
+                logger.info("[ExecutionService] Scope verification FAILED: %s", scope_logs)
                 return TaskEvent.VERIFY_FAILURE, scope_logs
 
             if success:
@@ -106,3 +113,17 @@ class ExecutionService:
         except Exception as e:
             logger.exception(f"Scope verifier error (treated as pass): {str(e)}")
             return True, "scope verifier error (skipped)"
+
+    async def _constraint_check(self, files: List[Dict[str, Any]]) -> Tuple[bool, str]:
+        """Runs deterministic constraint checks on artifact contents.
+
+        Checks for forbidden patterns (localStorage, fetch(), external CDNs).
+        This check runs for every task, regardless of ingest mode.
+        """
+        try:
+            from engine.services.verifiers.constraint_verifier import verify_constraints
+            result = verify_constraints(files, force_test_failure=False)
+            return result.ok, result.report
+        except Exception as e:
+            logger.exception(f"Constraint verifier error (treated as pass): {str(e)}")
+            return True, "constraint verifier error (skipped)"

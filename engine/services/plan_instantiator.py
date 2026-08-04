@@ -64,7 +64,10 @@ class PlanInstantiationService:
                     state_revision=0,
                     dependencies=task_draft.dependencies,
                     expected_artifacts=[a.model_dump() for a in task_draft.expected_artifacts],
-                    acceptance_criteria=task_draft.acceptance_criteria
+                    acceptance_criteria=task_draft.acceptance_criteria,
+                    review_checklist=getattr(task_draft, "review_checklist", None) or [],
+                    hard_constraints=getattr(task_draft, "hard_constraints", None) or [],
+                    tech_stack=getattr(task_draft, "tech_stack", None) or [],
                 )
                 self.db.add(new_task)
 

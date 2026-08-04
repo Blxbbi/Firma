@@ -1,9 +1,0 @@
-{
-  "project_name": "Neon-Snake Industrial Edition",
-  "prompt": "Projekt: 'Neon-Snake Industrial Edition'\\n\\nZiel: Erstelle ein vollst\u00c3\u00a4ndig funktionsf\u00c3\u00a4higes, browserbasiertes Snake-Spiel. Das Spiel soll in einer einzigen HTML-Datei (inklusive CSS und JS) oder einer sauberen Trennung (index.html, style.css, script.js) geliefert werden.\\n\\nFunktionale Anforderungen:\\n1. Core Gameplay: Klassisches Snake-Prinzip. Die Schlange bewegt sich in einem Raster, frisst Nahrung, w\u00c3\u00a4chst und das Spiel endet bei Kollision mit den W\u00c3\u00a4nden oder dem eigenen K\u00c3\u00b6rper.\\n2. Geschwindigkeitssteuerung: Implementiere ein Interface (z. B. Radio-Buttons oder ein Dropdown), mit dem der Spieler zwischen drei Geschwindigkeiten w\u00c3\u00a4hlen kann:\\n   - Slow (f\u00c3\u00bcr Anf\u00c3\u00a4nger)\\n   - Normal (Standard)\\n   - Fast (f\u00c3\u00bcr Profis)\\n   Die Geschwindigkeit muss den Takt des Game-Loops direkt beeinflussen.\\n3. UI/UX:\\n   - Ein prominenter Score-Z\u00c3\u00a4hler.\\n   - Ein 'Start/Restart'-Button, um das Spiel zu beginnen oder nach einem Game-Over neu zu starten.\\n   - Anzeige des aktuell gew\u00c3\u00a4hlten Geschwindigkeitsmodus.\\n\\nVisueller Stil:\\n- Look: 'Modern-Classic / Neon'. Dunkler Hintergrund (Dark Mode), leuchtende Farben f\u00c3\u00bcr die Schlange und die Nahrung (Glow-Effekte).\\n- Feeling: Das Spiel soll 'cool' und poliert aussehen, aber die Spielmechanik absolut klassisch bleiben (keine diagonalen Bewegungen, striktes Raster).\\n\\nTechnische Constraints:\\n- Verwende HTML5 Canvas f\u00c3\u00bcr das Rendering.\\n- Der Code muss robust sein (keine Fehler in der Browser-Konsole).\\n- Das Spiel muss direkt durch \u00c3\u2013ffnen der HTML-Datei im Browser spielbar sein.",
-  "verification": "structural_web",
-  "max_iterations": 5,
-  "concurrency": 1,
-  "provider": "nvidia",
-  "model": "meta/llama-3.1-70b-instruct"
-}

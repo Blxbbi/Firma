@@ -115,7 +115,8 @@ REVIEWER_DUMMY_REJECT_ONCE = os.environ.get("FIRMA_REVIEWER_DUMMY_REJECT_ONCE", 
 # Phase 6.2: Eskalations-Cap fuer Reviewer-Ablehnungen (Coder<->Reviewer Streit).
 # Nach N Reviewer-Ablehnungen -> Task FAILED_ITERATION_LIMIT (Eskalation Mensch/Lead,
 # kein endloses Re-Dispatch). Benign Double-Invocation wird im Guardian deduped.
-MAX_REVIEWER_REJECTIONS = int(os.environ.get("FIRMA_MAX_REVIEWER_REJECTIONS", "3"))
+# 2 = 1 original attempt + 1 retry = max 1x CODER retry after REVIEW_FAILURE.
+MAX_REVIEWER_REJECTIONS = int(os.environ.get("FIRMA_MAX_REVIEWER_REJECTIONS", "2"))
 
 # R2 Web Research (opt-in, default off).
 FIRMA_RESEARCH_WEB = os.environ.get("FIRMA_RESEARCH_WEB", "0").lower() in ("1", "true", "yes", "on")

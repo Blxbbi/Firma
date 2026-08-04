@@ -257,7 +257,7 @@ class Orchestrator:
         
         # Synchronized with Scheduler's ack_timeout (600s provider max + buffer)
         SOFT_TIMEOUT_THRESHOLD = timedelta(seconds=120)
-        HARD_TIMEOUT_THRESHOLD = timedelta(seconds=600)
+        HARD_TIMEOUT_THRESHOLD = timedelta(seconds=1800)
         now = datetime.now(timezone.utc)
         
         async with self.db.session_scope() as session:

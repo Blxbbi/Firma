@@ -1,4 +1,0 @@
-run_id=8aeff60b-4ada-44e6-840a-a2cdf1d88e0b
-promoted_at=2026-07-20T13:32:58.857749+00:00
-audit=C:\Users\arthu\Coding\Firma\archive\runs\8aeff60b-4ada-44e6-840a-a2cdf1d88e0b\audit.md
-firma_commit=a405b72a

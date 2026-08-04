@@ -109,7 +109,7 @@ def _run_callback(session_mode):
     try:
         transport = FakeTransport()
         provider = FakeProvider()
-        cb, _ = run_pi_mesh.make_pimesh_messenger_callback(
+        cb, _spawned, _task_done_events, _task_assigned_at, _task_cooldown = run_pi_mesh.make_pimesh_messenger_callback(
             transport=transport,
             provider=provider,
             crew_cwds={"PLANNER": "pimesh/planning-crew"},

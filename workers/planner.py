@@ -7,6 +7,7 @@ from pydantic import ValidationError
 from engine.providers.base import BaseLLMProvider
 from engine.models import PlanDraftSchema, Message, MessageHeader, MessageType
 from engine.exceptions import WorkerExecutionError
+from engine.prompt_loader import get_prompt_loader
 
 logger = logging.getLogger(__name__)
 audit_logger = logging.getLogger("firma.audit")
@@ -67,49 +68,9 @@ class PlannerWorker:
                 }
             )
 
-        system_prompt = (
-            "You are the Firma Planner. You operate as a deterministic API.\n"
-            "Your sole purpose is to decompose a user request into an execution plan.\n"
-            "\nREQUIRED OUTPUT FORMAT:\n"
-            "Return ONLY a valid JSON object with exactly these fields:\n"
-            "{\n"
-            "  \"plan_name\": \"Short descriptive name of the plan\",\n"
-            "  \"tasks\": [\n"
-            "    {\n"
-            "      \"id\": \"unique-task-id\",\n"
-            "      \"role\": \"PLANNER\" | \"CODER\" | \"REVIEWER\" | \"VERIFIER\",\n"
-            "      \"description\": \"Clear, actionable goal for this task\",\n"
-            "      \"dependencies\": [\"list-of-task-ids\"],\n"
-            "      \"expected_artifacts\": [\n"
-            "        { \"path\": \"file/path.ext\", \"type\": \"CREATE\" | \"UPDATE\" | \"DELETE\" }\n"
-            "      ],\n"
-            "      \"acceptance_criteria\": [\"Measurable criterion 1\", \"Measurable criterion 2\"]\n"
-            "    }\n"
-            "  ]\n"
-            "}\n"
-            "\nSTRICT CONSTRAINTS:\n"
-            "1. Do NOT include $defs, JSON-Schema definitions, or metadata.\n"
-            "2. Do NOT include markdown blocks (e.g., ```json ... ```).\n"
-            "3. Do NOT include any conversational filler, introductions, or explanations.\n"
-            "4. Do NOT include any text before or after the JSON object.\n"
-            "5. If you include $defs or schema documentation, the response will be REJECTED.\n"
-            "\nEXAMPLE OF CORRECT OUTPUT:\n"
-            "{\n"
-            "  \"plan_name\": \"Create Ping File\",\n"
-            "  \"tasks\": [\n"
-            "    {\n"
-            "      \"id\": \"task-1\",\n"
-            "      \"role\": \"CODER\",\n"
-            "      \"description\": \"Create ping.txt with content 'pong'\",\n"
-            "      \"dependencies\": [],\n"
-            "      \"expected_artifacts\": [ { \"path\": \"ping.txt\", \"type\": \"CREATE\" } ],\n"
-            "      \"acceptance_criteria\": [\"File ping.txt exists\", \"Contains 'pong'\"]\n"
-            "    }\n"
-            "  ]\n"
-            "}\n"
-        )
-        
-        user_prompt = f"Project ID: {project_id}\nUser Goal: {user_prompt}"
+        system_prompt = get_prompt_loader().load('planner', 'system')
+        user_template = get_prompt_loader().load('planner', 'user_template')
+        user_prompt = user_template.format(project_id=project_id, user_prompt=user_prompt)
         
         # We omit the raw Pydantic schema to prevent Model Reflection (Schema Mirroring)
         # We rely on the explicit structural prompt and the Provider's JSON mode.
@@ -118,6 +79,13 @@ class PlannerWorker:
         logger.info(f"[Worker] ABOUT TO CALL PROVIDER: project={project_id} model={self.model_name}")
         start_time = time.time()
         try:
+            if hasattr(self.provider, "set_role_context"):
+                self.provider.set_role_context(
+                    role="PLANNER",
+                    task_id=task_id,
+                    task_definition={}
+                )
+            
             # 1. Generate JSON via Provider
             raw_output = await self.provider.generate_json(
                 system_prompt=system_prompt,

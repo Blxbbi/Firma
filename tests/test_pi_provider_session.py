@@ -31,7 +31,12 @@ def test_build_args_collaborative_uses_session_flags():
     assert "--no-session" not in args
 
 
-def test_spawn_for_assignment_passes_session_to_worker():
+def test_normalize_extension_dir_replaces_backslashes():
+    p = _provider()
+    assert p._normalize_extension_dir(r"C:\Users\arthu\.pi\agent\npm\node_modules\pi-messenger") == "C:/Users/arthu/.pi/agent/npm/node_modules/pi-messenger"
+
+
+def test_spawn_for_assignment_normalizes_extension_dir():
     p = _provider()
     captured = {}
 
@@ -63,8 +68,23 @@ def test_spawn_for_assignment_passes_session_to_worker():
     assert captured["log_path"] is not None
 
 
+def test_spawn_for_assignment_normalizes_extension_dir_in_args():
+    p = _provider()
+    # Verify build_args normalizes extension dir
+    args = p.build_args("test", model="kilo/kilo", session_id="sid", session_dir="/tmp/sess")
+    # Find --extension arg
+    ext_idx = args.index("--extension")
+    ext_path = args[ext_idx + 1]
+    # Should use forward slashes
+    assert "\\" not in ext_path
+    assert "/" in ext_path
+    assert ext_path == "C:/Users/arthu/.pi/agent/npm/node_modules/pi-messenger"
+
+
 if __name__ == "__main__":
     test_build_args_deterministic_uses_no_session()
     test_build_args_collaborative_uses_session_flags()
-    test_spawn_for_assignment_passes_session_to_worker()
+    test_normalize_extension_dir_replaces_backslashes()
+    test_spawn_for_assignment_normalizes_extension_dir()
+    test_spawn_for_assignment_normalizes_extension_dir_in_args()
     print("ALL TESTS PASSED")

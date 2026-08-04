@@ -30,7 +30,7 @@ class GovernanceMatrix:
         (ExecutionPhase.PLANNING, TaskEvent.PLAN_APPROVED): TransitionResult(ExecutionPhase.CODING, AssignedRole.CODER),
         (ExecutionPhase.PLANNING, TaskEvent.PLAN_REJECTED): TransitionResult(ExecutionPhase.PLANNING, AssignedRole.PLANNER),
         (ExecutionPhase.PLANNING, TaskEvent.WORKER_TIMEOUT): TransitionResult(ExecutionPhase.PLANNING, AssignedRole.PLANNER),
-        (ExecutionPhase.PLANNING, TaskEvent.TASK_FAILED): TransitionResult(ExecutionPhase.FAILED, None),
+        (ExecutionPhase.PLANNING, TaskEvent.TASK_FAILED): TransitionResult(ExecutionPhase.PLANNING, AssignedRole.PLANNER),
         
         # Coding transitions
         (ExecutionPhase.CODING, TaskEvent.CODE_SUBMITTED): TransitionResult(ExecutionPhase.VERIFYING, AssignedRole.SYSTEM),
